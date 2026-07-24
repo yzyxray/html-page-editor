@@ -1,0 +1,183 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #f8fafc;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ═══════════════════════════════════════════════
+   GrapesJS Canvas — bright, clean editing area
+   ═══════════════════════════════════════════════ */
+
+/* Editor wrapper background */
+.gjs-cv-canvas {
+  background-color: #e8ecf0 !important;
+}
+
+/* The frame/viewport containing the page */
+.gjs-cv-canvas__frames {
+  box-shadow: 0 2px 20px rgba(0,0,0,0.12) !important;
+}
+
+/* The actual page content iframe */
+.gjs-frame-wrapper {
+  background: #ffffff !important;
+}
+
+/* GrapesJS left sidebar (blocks panel) */
+.gjs-pn-panels {
+  background: #f1f5f9 !important;
+}
+
+.gjs-pn-panel {
+  border-right: 1px solid #e2e8f0 !important;
+}
+
+/* Blocks panel header */
+.gjs-pn-commands {
+  background: #f8fafc !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+/* Block items */
+.gjs-block {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+}
+
+.gjs-block:hover {
+  border-color: #818cf8 !important;
+  box-shadow: 0 2px 8px rgba(99,102,241,0.15) !important;
+}
+
+.gjs-block__label {
+  color: #334155 !important;
+  font-weight: 500 !important;
+}
+
+/* Style manager (right panel) */
+.gjs-sm-header {
+  background: #f8fafc !important;
+}
+
+.gjs-sm-sector .gjs-sm-title {
+  background: #f1f5f9 !important;
+  color: #334155 !important;
+  font-weight: 600 !important;
+}
+
+.gjs-field {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  border-radius: 6px !important;
+}
+
+.gjs-field input, .gjs-field select {
+  color: #334155 !important;
+}
+
+/* Toolbar */
+.gjs-toolbar {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
+}
+
+.gjs-toolbar-item {
+  color: #475569 !important;
+}
+
+.gjs-toolbar-item:hover {
+  background: #f1f5f9 !important;
+  color: #6366f1 !important;
+}
+
+/* One-bg color — overrides the dark background */
+.gjs-one-bg {
+  background-color: #f8fafc !important;
+}
+
+.gjs-two-color {
+  color: #6366f1 !important;
+}
+
+/* Layer manager */
+.gjs-layer {
+  background: #ffffff !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+}
+
+.gjs-layer-title {
+  color: #334155 !important;
+}
+
+/* Selector manager */
+.gjs-clm-tags .gjs-clm-tag {
+  background: #6366f1 !important;
+  color: #fff !important;
+}
+
+/* Badge / pill */
+.gjs-badge {
+  background: #6366f1 !important;
+}
+
+/* ── Rich text editor in canvas ── */
+.gjs-rte-toolbar {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.1) !important;
+}
+
+.gjs-rte-action {
+  color: #475569 !important;
+}
+
+.gjs-rte-action:hover {
+  background: #f1f5f9 !important;
+  color: #6366f1 !important;
+}
+
+/* ═══════════════════════════════════════════════
+   Scrollbar styles
+   ═══════════════════════════════════════════════ */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a1a1a1;
+}
