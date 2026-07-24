@@ -70,7 +70,7 @@ export function ImportPanel() {
   const stats = useWorkflowStore((s) => s.stats);
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
+    <div className="max-w-6xl mx-auto pt-10 pb-6 px-6">
       <div className="mb-6">
         <h2 className="text-2xl font-semibold text-slate-800">导入 HTML</h2>
         <p className="text-slate-500 mt-1 text-sm">粘贴竞品 HTML 源码或上传 .html 文件开始编辑</p>
