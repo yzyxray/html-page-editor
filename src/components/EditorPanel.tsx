@@ -5,7 +5,7 @@ import grapesjsPresetWebpage from 'grapesjs-preset-webpage';
 import {
   Monitor, Tablet, Smartphone, Code, Eye, RotateCcw, AlertTriangle,
   Type, Check, X, Link2, Image as ImageIcon, FormInput, Layers, ChevronDown,
-  MousePointer2,
+  MousePointer2, Settings, Download, UploadCloud, ExternalLink, CheckCircle2, XCircle,
 } from 'lucide-react';
 import { useWorkflowStore } from '../store/useWorkflowStore';
 import { scanLinks, applyLinkReplacements } from '../lib/link-scanner';
@@ -126,6 +126,67 @@ function readFileAsText(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error || new Error('读取文件失败'));
     reader.readAsText(file);
   });
+}
+
+// ── CRC-32 (标准多项式 0xEDB88320) ──
+const CRC32_TABLE: number[] = (() => {
+  const t = new Array<number>(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[i] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(bytes: Uint8Array): number {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = CRC32_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+// ── 极简 STORE-only zip（单文件）──
+// Cloudflare Pages Direct Upload API 要求 multipart 提交一个 zip（字段名 file）
+// 这里手写一个最小实现，避免引入额外依赖
+function makeZip(filename: string, data: Uint8Array): Uint8Array {
+  const enc = new TextEncoder();
+  const nameBytes = enc.encode(filename);
+  const crc = crc32(data);
+  const size = data.length;
+  const now = new Date();
+  const dosTime = ((now.getHours() & 0x1f) << 11) | ((now.getMinutes() & 0x3f) << 5) | ((now.getSeconds() / 2) & 0x1f);
+  const dosDate = (((now.getFullYear() - 1980) & 0x7f) << 9) | (((now.getMonth() + 1) & 0xf) << 5) | (now.getDate() & 0x1f);
+  const localHeaderSize = 30 + nameBytes.length;
+  const cdSize = 46 + nameBytes.length;
+  const total = localHeaderSize + size + cdSize + 22;
+  const out = new Uint8Array(total);
+  const dv = new DataView(out.buffer);
+  let p = 0;
+  // Local file header
+  dv.setUint32(p, 0x04034b50, true); p += 4;
+  dv.setUint16(p, 20, true); p += 2; dv.setUint16(p, 0, true); p += 2; dv.setUint16(p, 0, true); p += 2;
+  dv.setUint16(p, dosTime, true); p += 2; dv.setUint16(p, dosDate, true); p += 2;
+  dv.setUint32(p, crc, true); p += 4; dv.setUint32(p, size, true); p += 4; dv.setUint32(p, size, true); p += 4;
+  dv.setUint16(p, nameBytes.length, true); p += 2; dv.setUint16(p, 0, true); p += 2;
+  out.set(nameBytes, p); p += nameBytes.length;
+  // File data
+  out.set(data, p); p += size;
+  // Central directory
+  dv.setUint32(p, 0x02014b50, true); p += 4;
+  dv.setUint16(p, 20, true); p += 2; dv.setUint16(p, 20, true); p += 2;
+  dv.setUint16(p, 0, true); p += 2; dv.setUint16(p, 0, true); p += 2;
+  dv.setUint16(p, dosTime, true); p += 2; dv.setUint16(p, dosDate, true); p += 2;
+  dv.setUint32(p, crc, true); p += 4; dv.setUint32(p, size, true); p += 4; dv.setUint32(p, size, true); p += 4;
+  dv.setUint16(p, nameBytes.length, true); p += 2; dv.setUint16(p, 0, true); p += 2; dv.setUint16(p, 0, true); p += 2;
+  dv.setUint16(p, 0, true); p += 2; dv.setUint16(p, 0, true); p += 2; dv.setUint32(p, 0, true); p += 4; dv.setUint32(p, 0, true); p += 4;
+  out.set(nameBytes, p); p += nameBytes.length;
+  // End of central directory
+  dv.setUint32(p, 0x06054b50, true); p += 4;
+  dv.setUint16(p, 0, true); p += 2; dv.setUint16(p, 0, true); p += 2;
+  dv.setUint16(p, 1, true); p += 2; dv.setUint16(p, 1, true); p += 2;
+  dv.setUint32(p, cdSize, true); p += 4; dv.setUint32(p, localHeaderSize + size, true); p += 4;
+  dv.setUint16(p, 0, true); p += 2;
+  return out;
 }
 
 // ── 文字/链接编辑侧栏 ──
@@ -747,6 +808,69 @@ function BatchLinkDrawer({
   );
 }
 
+// ── Cloudflare Pages 配置 ──
+interface CfConfig {
+  accountId: string;
+  apiToken: string;
+  projectName: string;
+}
+
+function CloudflareSettingsModal({
+  initial,
+  onSave,
+  onClose,
+}: {
+  initial: CfConfig;
+  onSave: (cfg: CfConfig) => void;
+  onClose: () => void;
+}) {
+  const [accountId, setAccountId] = useState(initial.accountId);
+  const [apiToken, setApiToken] = useState(initial.apiToken);
+  const [projectName, setProjectName] = useState(initial.projectName);
+  const ready = accountId.trim() && apiToken.trim() && projectName.trim();
+  return (
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-[480px] max-w-[92vw] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-slate-800 flex items-center gap-2">
+            <Settings size={18} className="text-[#6366f1]" /> Cloudflare Pages 设置
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded"><X size={18} /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="text-xs font-medium text-slate-600 mb-1.5 block">Account ID</label>
+            <input value={accountId} onChange={(e) => setAccountId(e.target.value)} placeholder="例如 0a1b2c3d4e5f..."
+              className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366f1]" />
+            <p className="text-[10px] text-slate-400 mt-1">Cloudflare 控制台右下角 / Workers & Pages 侧栏可查</p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 mb-1.5 block">API Token</label>
+            <input type="password" value={apiToken} onChange={(e) => setApiToken(e.target.value)} placeholder="权限：Account → Cloudflare Pages → Edit"
+              className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366f1]" />
+            <p className="text-[10px] text-slate-400 mt-1">
+              在 <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer" className="text-[#6366f1] hover:underline">dash.cloudflare.com/profile/api-tokens</a> 创建，仅存于本浏览器 localStorage
+            </p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 mb-1.5 block">Pages 项目名</label>
+            <input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="例如 acme-landing"
+              className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366f1]" />
+            <p className="text-[10px] text-slate-400 mt-1">需提前在 Cloudflare 控制台建好（Framework preset 选 None），并绑好自定义域名</p>
+          </div>
+          <button
+            onClick={() => ready && onSave({ accountId: accountId.trim(), apiToken: apiToken.trim(), projectName: projectName.trim() })}
+            disabled={!ready}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Check size={16} /> 保存设置
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── 主 EditorPanel ──
 export function EditorPanel() {
   const { cleanedHtml, finalHtml, setFinalHtml } = useWorkflowStore();
@@ -760,6 +884,34 @@ export function EditorPanel() {
   const [showBatchDrawer, setShowBatchDrawer] = useState(false);
   const cachedClassesRef = useRef<string[]>([]);
   const insertFileRef = useRef<HTMLInputElement>(null);
+
+  // Cloudflare Pages 配置（持久化到 localStorage）
+  const [cfConfig, setCfConfig] = useState<CfConfig>({ accountId: '', apiToken: '', projectName: '' });
+  const [showCfSettings, setShowCfSettings] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string; link?: { text: string; url: string } } | null>(null);
+
+  // 启动时从 localStorage 读取配置
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('cf-pages-config');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (p && typeof p === 'object') {
+          setCfConfig({
+            accountId: p.accountId || '',
+            apiToken: p.apiToken || '',
+            projectName: p.projectName || '',
+          });
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const showNotification = (n: typeof notification, duration = 4000) => {
+    setNotification(n);
+    if (n) setTimeout(() => setNotification((cur) => (cur === n ? null : cur)), duration);
+  };
 
   const effectiveHtml = finalHtml || cleanedHtml;
 
@@ -1146,6 +1298,84 @@ export function EditorPanel() {
     refreshCachedClasses(editorRef.current);
   };
 
+  // ── 取得当前编辑器的完整 HTML（含 <style> + <!DOCTYPE>）──
+  const getCurrentFullHtml = useCallback((): string => {
+    if (!editorRef.current) return '';
+    const html = editorRef.current.getHtml();
+    const css = editorRef.current.getCss() || '';
+    return wrapWithStyle(html, css);
+  }, []);
+
+  // 保存 Cloudflare 设置
+  const handleSaveCfSettings = (cfg: CfConfig) => {
+    setCfConfig(cfg);
+    try { localStorage.setItem('cf-pages-config', JSON.stringify(cfg)); } catch { /* ignore */ }
+    setShowCfSettings(false);
+    showNotification({ type: 'success', message: 'Cloudflare 设置已保存' }, 3000);
+  };
+
+  // 保存到本地：下载带时间戳的 HTML 文件
+  const handleSaveLocal = () => {
+    const html = getCurrentFullHtml();
+    if (!html) { showNotification({ type: 'error', message: '没有可保存的 HTML' }, 3000); return; }
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const filename = `landing-page-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.html`;
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showNotification({ type: 'success', message: `已保存到本地：${filename}` }, 4000);
+  };
+
+  // 一键发布到 Cloudflare Pages
+  const handlePublishToCloudflare = async () => {
+    if (!cfConfig.accountId || !cfConfig.apiToken || !cfConfig.projectName) {
+      setShowCfSettings(true);
+      showNotification({ type: 'error', message: '请先配置 Cloudflare 设置（点击工具栏齿轮图标）' }, 4000);
+      return;
+    }
+    const html = getCurrentFullHtml();
+    if (!html) { showNotification({ type: 'error', message: '没有可发布的 HTML' }, 3000); return; }
+    setPublishing(true);
+    try {
+      const enc = new TextEncoder();
+      const bytes = enc.encode(html);
+      const zipBytes = makeZip('index.html', bytes);
+      const zipBlob = new Blob([zipBytes], { type: 'application/zip' });
+      const form = new FormData();
+      form.append('file', zipBlob, 'index.html.zip');
+      const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfConfig.accountId)}/pages/projects/${encodeURIComponent(cfConfig.projectName)}/deployments`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cfConfig.apiToken}` },
+        body: form,
+      });
+      const data: any = await resp.json().catch(() => ({}));
+      if (!resp.ok || (data && data.success === false)) {
+        const msg = (data && data.errors && data.errors[0] && data.errors[0].message) || `HTTP ${resp.status}`;
+        throw new Error(msg);
+      }
+      const projectUrl = `https://${cfConfig.projectName}.pages.dev`;
+      const depAlias = data && data.result && data.result.url ? data.result.url : '';
+      showNotification({
+        type: 'success',
+        message: `已发布到 ${projectUrl}`,
+        link: depAlias ? { text: '查看本次部署', url: 'https://' + depAlias } : undefined,
+      }, 6000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '发布失败';
+      showNotification({ type: 'error', message: `发布失败：${msg}` }, 6000);
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   // ── Empty state ──
   if (!effectiveHtml) {
     return (
@@ -1221,6 +1451,22 @@ export function EditorPanel() {
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg transition-colors">
             <RotateCcw size={14} />保存到工作流
           </button>
+          <div className="w-px h-5 bg-slate-200 mx-0.5" />
+          <button onClick={handleSaveLocal}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            title="把当前 HTML 下载到本地（带时间戳文件名）">
+            <Download size={14} />保存到本地
+          </button>
+          <button onClick={handlePublishToCloudflare} disabled={publishing}
+            className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${publishing ? 'bg-orange-300 text-white cursor-wait' : 'bg-orange-500 hover:bg-orange-600 text-white shadow-sm shadow-orange-200'}`}
+            title="一键发布到 Cloudflare Pages（Direct Upload）">
+            <UploadCloud size={14} />{publishing ? '发布中...' : '发布到 Cloudflare'}
+          </button>
+          <button onClick={() => setShowCfSettings(true)}
+            className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+            title="Cloudflare 设置">
+            <Settings size={15} />
+          </button>
         </div>
       </div>
 
@@ -1254,6 +1500,33 @@ export function EditorPanel() {
           onClose={() => setShowBatchDrawer(false)}
           onApply={handleBatchApply}
         />
+      )}
+
+      {/* Cloudflare Pages 设置弹窗 */}
+      {showCfSettings && (
+        <CloudflareSettingsModal
+          initial={cfConfig}
+          onSave={handleSaveCfSettings}
+          onClose={() => setShowCfSettings(false)}
+        />
+      )}
+
+      {/* 顶部通知条 */}
+      {notification && (
+        <div className={`fixed top-4 right-4 z-[100] flex items-start gap-2 max-w-md px-4 py-3 rounded-lg shadow-lg border ${notification.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+          {notification.type === 'success'
+            ? <CheckCircle2 size={18} className="shrink-0 mt-0.5" />
+            : <XCircle size={18} className="shrink-0 mt-0.5" />}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm break-words">{notification.message}</p>
+            {notification.link && (
+              <a href={notification.link.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 mt-1 text-xs underline">
+                <ExternalLink size={11} /> {notification.link.text}
+              </a>
+            )}
+          </div>
+          <button onClick={() => setNotification(null)} className="opacity-60 hover:opacity-100 shrink-0"><X size={14} /></button>
+        </div>
       )}
     </div>
   );
