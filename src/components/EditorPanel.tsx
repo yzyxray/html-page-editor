@@ -1369,8 +1369,13 @@ export function EditorPanel() {
         link: depAlias ? { text: '查看本次部署', url: 'https://' + depAlias } : undefined,
       }, 6000);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '发布失败';
-      showNotification({ type: 'error', message: `发布失败：${msg}` }, 6000);
+      let msg: string;
+      if (err instanceof TypeError && /Failed to fetch|NetworkError|fetch/i.test(err.message)) {
+        msg = '网络请求失败（浏览器连不上 api.cloudflare.com）。通常是代理未代理该域名或被墙：F12→Network 查看具体错误，并在 Clash 里把 api.cloudflare.com 加到代理规则。';
+      } else {
+        msg = err instanceof Error ? err.message : '发布失败';
+      }
+      showNotification({ type: 'error', message: `发布失败：${msg}` }, 10000);
     } finally {
       setPublishing(false);
     }
