@@ -59,7 +59,7 @@ export function CleanerPanel() {
 
   if (!rawHtml) {
     return (
-      <div className="max-w-6xl mx-auto p-6">
+      <div className="max-w-6xl mx-auto pt-10 pb-6 px-6">
         <div className="mb-6">
           <h2 className="text-2xl font-semibold text-slate-800">页面清洗</h2>
           <p className="text-slate-500 mt-1 text-sm">清理 JSON-LD、追踪像素、注释等不必要元素</p>
@@ -72,7 +72,7 @@ export function CleanerPanel() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
+    <div className="max-w-6xl mx-auto pt-10 pb-6 px-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-semibold text-slate-800">页面清洗</h2>

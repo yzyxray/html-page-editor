@@ -55,7 +55,7 @@ export function ExportPanel() {
 
   if (!effectiveHtml) {
     return (
-      <div className="max-w-6xl mx-auto p-6">
+      <div className="max-w-6xl mx-auto pt-10 pb-6 px-6">
         <div className="mb-6">
           <h2 className="text-2xl font-semibold text-slate-800">导出 HTML</h2>
           <p className="text-slate-500 mt-1 text-sm">导出独立 HTML 文件，可直接部署到 Cloudflare Pages 或 Vercel</p>
@@ -69,7 +69,7 @@ export function ExportPanel() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
+    <div className="max-w-6xl mx-auto pt-10 pb-6 px-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-semibold text-slate-800">导出 HTML</h2>

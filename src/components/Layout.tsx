@@ -60,7 +60,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Main Content */}
-      <main className="flex-1 mt-[104px] overflow-auto">
+      <main className="mt-[140px] h-[calc(100vh-140px)] overflow-auto">
         {children}
       </main>
     </div>

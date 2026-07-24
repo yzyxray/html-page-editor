@@ -309,7 +309,7 @@ export function ScriptManagerPanel() {
 
   if (!rawHtml) {
     return (
-      <div className="max-w-6xl mx-auto p-6">
+      <div className="max-w-6xl mx-auto pt-10 pb-6 px-6">
         <div className="mb-6">
           <h2 className="text-2xl font-semibold text-slate-800">脚本管理</h2>
           <p className="text-slate-500 mt-1 text-sm">检测到的追踪脚本 — 选择移除、替换为你自己的，或保留</p>
@@ -331,7 +331,7 @@ export function ScriptManagerPanel() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
+    <div className="max-w-6xl mx-auto pt-10 pb-6 px-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-semibold text-slate-800">脚本管理</h2>

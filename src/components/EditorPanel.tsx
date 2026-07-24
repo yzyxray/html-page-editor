@@ -1379,7 +1379,7 @@ export function EditorPanel() {
   // ── Empty state ──
   if (!effectiveHtml) {
     return (
-      <div className="max-w-6xl mx-auto p-6">
+      <div className="max-w-6xl mx-auto pt-10 pb-6 px-6">
         <div className="mb-6">
           <h2 className="text-2xl font-semibold text-slate-800">可视化编辑</h2>
           <p className="text-slate-500 mt-1 text-sm">拖拽编辑页面元素，调整样式和布局；点击链接可直接修改地址</p>
@@ -1415,7 +1415,7 @@ export function EditorPanel() {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           <span className="text-xs text-slate-400">{editorReady ? '编辑器就绪' : '加载中...'}</span>
           <button
             onClick={() => insertFileRef.current?.click()}
