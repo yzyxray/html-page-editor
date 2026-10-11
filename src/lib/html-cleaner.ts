@@ -91,9 +91,11 @@ export function cleanHtml(html: string, options: CleanOptions): CleanResult {
       const w = wAttr !== null ? parseInt(wAttr, 10) : NaN;
       const h = hAttr !== null ? parseInt(hAttr, 10) : NaN;
       const explicitlyTiny = Number.isFinite(w) && Number.isFinite(h) && w <= 1 && h <= 1;
+      // 只认「显式声明 1x1」或「命中已知追踪域名」两种强信号。
+      // 刻意不再用 style="display:none" 作为判据——很多站点把真实图片
+      // （灯箱大图、预加载图、hover 图）也设成隐藏，用它当判据会误删真实内容。
       const isTrackingPixel =
         explicitlyTiny ||
-        (img.getAttribute('style') || '').includes('display:none') ||
         hasSourceMatch(img, TRACKING_PIXEL_PATTERNS);
 
       if (isTrackingPixel) {
