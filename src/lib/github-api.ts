@@ -289,4 +289,63 @@ export async function deleteFile(cfg: GitHubConfig, path: string, message: strin
   });
 }
 
+/**
+ * 确保目标分支存在；不存在则从仓库默认分支创建。
+ * 用于落地页部署分支——首次推送时该分支往往还没有。
+ */
+export async function ensureBranch(cfg: GitHubConfig, branch: string): Promise<void> {
+  try {
+    await request(cfg, 'GET', `/git/ref/heads/${encodeURIComponent(branch)}`);
+    return;
+  } catch (err) {
+    // 只有「分支不存在」才继续创建；权限、网络等其他错误必须原样抛出
+    if (!(err instanceof GitHubError) || err.kind !== 'not-found') throw err;
+  }
+
+  const repo = await request<any>(cfg, 'GET', '');
+  const baseBranch: string = repo.default_branch || 'main';
+  const baseRef = await request<any>(cfg, 'GET', `/git/ref/heads/${encodeURIComponent(baseBranch)}`);
+
+  await request(cfg, 'POST', '/git/refs', {
+    ref: `refs/heads/${branch}`,
+    sha: baseRef.object.sha,
+  });
+}
+
+/**
+ * 写到指定分支（落地页部署分支），分支不存在时自动创建。
+ *
+ * 与 writeFile 的区别：writeFile 始终操作 cfg.branch（存档/模板库），
+ * 而这里显式指定分支，把index.html 放在部署分支的根目录——
+ * Cloudflare Pages 绑定该分支后即可直接上线。
+ */
+export async function writeFileOnBranch(
+  cfg: GitHubConfig,
+  branch: string,
+  path: string,
+  text: string,
+  message: string
+): Promise<void> {
+  await ensureBranch(cfg, branch);
+
+  let sha: string | null = null;
+  try {
+    const r = await request<any>(
+      cfg,
+      'GET',
+      `/contents/${encodePath(path)}?ref=${encodeURIComponent(branch)}`
+    );
+    sha = r.sha;
+  } catch (err) {
+    if (!(err instanceof GitHubError) || err.kind !== 'not-found') throw err;
+  }
+
+  await request(cfg, 'PUT', `/contents/${encodePath(path)}`, {
+    message,
+    content: toBase64(text),
+    branch,
+    ...(sha ? { sha } : {}),
+  });
+}
+
 export { toBase64, fromBase64 };

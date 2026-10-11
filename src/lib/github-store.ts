@@ -37,6 +37,7 @@ export const DEFAULT_GH_CONFIG: GitHubConfig = {
   owner: '',
   repo: '',
   branch: 'main',
+  deployBranch: 'site',
   basePath: '',
 };
 
@@ -54,6 +55,11 @@ export function readGhConfig(): GitHubConfig | null {
       owner: typeof parsed.owner === 'string' ? parsed.owner : '',
       repo: typeof parsed.repo === 'string' ? parsed.repo : '',
       branch: typeof parsed.branch === 'string' && parsed.branch ? parsed.branch : 'main',
+      // 老配置没有 deployBranch 字段时兜底为 site，不影响已保存的其他字段
+      deployBranch:
+        typeof parsed.deployBranch === 'string' && parsed.deployBranch
+          ? parsed.deployBranch
+          : DEFAULT_GH_CONFIG.deployBranch,
       basePath: typeof parsed.basePath === 'string' ? parsed.basePath.replace(/^\/+|\/+$/g, '') : '',
     };
   } catch (err) {

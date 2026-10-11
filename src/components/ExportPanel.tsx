@@ -1,8 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Download, Copy, Check, FileText, Globe, AlertTriangle, Settings, Code, RefreshCw } from 'lucide-react';
+import {
+  Download, Copy, Check, FileText, Globe, AlertTriangle, Settings, Code, RefreshCw,
+  Archive, UploadCloud, FileDown, LoaderCircle,
+} from 'lucide-react';
 import { useWorkflowStore } from '../store/useWorkflowStore';
-import { exportHtml, downloadHtml } from '../lib/exporter';
+import { exportHtml, downloadHtml, downloadZip } from '../lib/exporter';
 import type { ExportResult } from '../lib/exporter';
+import { writeFileOnBranch, GitHubError } from '../lib/github-api';
+import { readGhConfig, isGhConfigReady, saveArchive } from '../lib/github-store';
+import { classifySize, formatBytes, SIZE_TIER_MESSAGES } from '../lib/size-guard';
 
 export function ExportPanel() {
   const { finalHtml, cleanedHtml, exportOptions, setExportOptions, detectedScripts, addedScripts } = useWorkflowStore();
@@ -11,6 +17,82 @@ export function ExportPanel() {
   const [copied, setCopied] = useState(false);
   const hasAutoExported = useRef(false);
   const prevHtmlRef = useRef('');
+
+  // ── 发布与存档出口 ──
+  const [busyOutlet, setBusyOutlet] = useState<'' | 'archive' | 'deploy' | 'zip'>('');
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [archiveName, setArchiveName] = useState('');
+
+  const ghConfig = readGhConfig();
+  const ghReady = isGhConfigReady(ghConfig);
+  const tier = exportResult ? classifySize(exportResult.size) : 'normal';
+
+  const notify = useCallback((type: 'success' | 'error', message: string) => {
+    setNotice({ type, message });
+  }, []);
+
+  /** GitHub 未配置时给出明确引导，而不是抛一个天书般的 API 错误 */
+  const requireGh = useCallback((): boolean => {
+    if (isGhConfigReady(readGhConfig())) return true;
+    notify(
+      'error',
+      '尚未配置 GitHub。请点顶栏的「配置 GitHub」填入 token 与仓库信息后再使用该出口。'
+    );
+    return false;
+  }, [notify]);
+
+  const handleArchive = useCallback(async () => {
+    if (!exportResult || busyOutlet) return;
+    if (!requireGh()) return;
+    const name = archiveName.trim() || exportOptions.fileName || '未命名落地页';
+    setBusyOutlet('archive');
+    try {
+      const dir = await saveArchive(readGhConfig()!, { name, html: exportResult.html });
+      notify('success', `已存档到 GitHub：${dir}`);
+      setArchiveName('');
+    } catch (err) {
+      console.error('[ExportPanel] 存档失败:', err);
+      notify('error', err instanceof GitHubError ? err.message : '存档失败');
+    } finally {
+      setBusyOutlet('');
+    }
+  }, [exportResult, busyOutlet, archiveName, exportOptions.fileName, requireGh, notify]);
+
+  const handleDeploy = useCallback(async () => {
+    if (!exportResult || busyOutlet) return;
+    if (!requireGh()) return;
+    const cfg = readGhConfig()!;
+    setBusyOutlet('deploy');
+    try {
+      await writeFileOnBranch(
+        cfg,
+        cfg.deployBranch || 'site',
+        'index.html',
+        exportResult.html,
+        `deploy: ${exportOptions.fileName || 'landing-page'} @ ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`
+      );
+      notify(
+        'success',
+        `已推送到部署分支 ${cfg.deployBranch}。若该分支已绑定 Cloudflare Pages 项目，约 1 分钟内自动上线。`
+      );
+    } catch (err) {
+      console.error('[ExportPanel] 推送失败:', err);
+      notify('error', err instanceof GitHubError ? err.message : '推送失败');
+    } finally {
+      setBusyOutlet('');
+    }
+  }, [exportResult, busyOutlet, exportOptions.fileName, requireGh, notify]);
+
+  const handleZip = useCallback(() => {
+    if (!exportResult || busyOutlet) return;
+    setBusyOutlet('zip');
+    try {
+      downloadZip(exportResult.html, exportOptions.fileName);
+      notify('success', 'zip 已下载。包内只有一个 index.html，可直接拖进任意静态托管平台。');
+    } finally {
+      setBusyOutlet('');
+    }
+  }, [exportResult, busyOutlet, exportOptions.fileName, notify]);
 
   const effectiveHtml = finalHtml || cleanedHtml;
 
@@ -154,6 +236,109 @@ export function ExportPanel() {
                 </div>
               </label>
             </div>
+          </div>
+
+          {/* 发布与存档 */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <h3 className="text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
+              <UploadCloud size={16} className="text-[#6366f1]" />
+              发布与存档
+            </h3>
+            <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">
+              {ghReady ? (
+                <>
+                  目标仓库{' '}
+                  <code className="font-mono text-slate-500">
+                    {ghConfig!.owner}/{ghConfig!.repo}
+                  </code>
+                </>
+              ) : (
+                '需要先配置 GitHub——点顶栏「配置 GitHub」填入 token 与仓库信息'
+              )}
+            </p>
+
+            {/* 存档 */}
+            <input
+              type="text"
+              value={archiveName}
+              onChange={(e) => setArchiveName(e.target.value)}
+              placeholder={`存档名称（默认 ${exportOptions.fileName || 'landing-page'}）`}
+              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366f1] focus:border-transparent mb-2"
+              spellCheck={false}
+            />
+            <button
+              onClick={handleArchive}
+              disabled={!!busyOutlet || !exportResult}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed mb-2"
+            >
+              {busyOutlet === 'archive' ? (
+                <LoaderCircle size={14} className="animate-spin" />
+              ) : (
+                <Archive size={14} />
+              )}
+              {busyOutlet === 'archive' ? '正在写入 GitHub...' : '存档到 GitHub'}
+            </button>
+
+            {/* 推送落地页 */}
+            <button
+              onClick={handleDeploy}
+              disabled={!!busyOutlet || !exportResult}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed mb-2"
+            >
+              {busyOutlet === 'deploy' ? (
+                <LoaderCircle size={14} className="animate-spin" />
+              ) : (
+                <UploadCloud size={14} />
+              )}
+              {busyOutlet === 'deploy' ? '正在推送...' : '推送落地页（触发 Pages 部署）'}
+            </button>
+
+            {/* 下载 zip */}
+            <button
+              onClick={handleZip}
+              disabled={!!busyOutlet || !exportResult}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <FileDown size={14} />
+              下载 zip（可直接拖进任意静态托管）
+            </button>
+
+            {/* 体积分级提示 */}
+            {tier !== 'normal' && (
+              <div className="mt-3 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-700 leading-relaxed flex items-start gap-1.5">
+                <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                <span>{SIZE_TIER_MESSAGES[tier].body}</span>
+              </div>
+            )}
+
+            {/* 降级提示 */}
+            {exportResult?.degraded && exportResult.skippedSteps.length > 0 && (
+              <div className="mt-2 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-600 leading-relaxed">
+                页面较大，本次导出已跳过：
+                <span className="font-medium text-slate-700 mx-1">
+                  {exportResult.skippedSteps.join('、')}
+                </span>
+                ，以保证不卡死。输出为原样格式，不影响页面可用性。
+              </div>
+            )}
+
+            {/* 通知 */}
+            {notice && (
+              <div
+                className={`mt-3 p-2.5 rounded-lg text-[11px] leading-relaxed flex items-start gap-1.5 ${
+                  notice.type === 'success'
+                    ? 'bg-green-50 text-green-700 border border-green-200'
+                    : 'bg-red-50 text-red-700 border border-red-200'
+                }`}
+              >
+                {notice.type === 'success' ? (
+                  <Check size={12} className="shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                )}
+                <span className="break-words">{notice.message}</span>
+              </div>
+            )}
           </div>
 
           {/* Tracking Summary */}

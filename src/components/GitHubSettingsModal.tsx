@@ -18,6 +18,9 @@ export function GitHubSettingsModal({ initial, onSave, onClear, onClose }: Props
   const [owner, setOwner] = useState(initial?.owner ?? '');
   const [repo, setRepo] = useState(initial?.repo ?? '');
   const [branch, setBranch] = useState(initial?.branch ?? DEFAULT_GH_CONFIG.branch);
+  const [deployBranch, setDeployBranch] = useState(
+    initial?.deployBranch ?? DEFAULT_GH_CONFIG.deployBranch
+  );
   const [basePath, setBasePath] = useState(initial?.basePath ?? '');
   const [showToken, setShowToken] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -30,6 +33,7 @@ export function GitHubSettingsModal({ initial, onSave, onClear, onClose }: Props
     owner: owner.trim(),
     repo: repo.trim(),
     branch: branch.trim() || 'main',
+    deployBranch: deployBranch.trim() || DEFAULT_GH_CONFIG.deployBranch,
     basePath: basePath.trim().replace(/^\/+|\/+$/g, ''),
   });
 
@@ -146,10 +150,10 @@ export function GitHubSettingsModal({ initial, onSave, onClear, onClose }: Props
             存档与模板库建议用一个专门的私有仓库，与本工具源码仓库分开。
           </p>
 
-          {/* Branch / BasePath */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Branch / DeployBranch / BasePath */}
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="text-xs font-medium text-slate-600 mb-1.5 block">分支</label>
+              <label className="text-xs font-medium text-slate-600 mb-1.5 block">存档分支</label>
               <input
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
@@ -159,16 +163,30 @@ export function GitHubSettingsModal({ initial, onSave, onClear, onClose }: Props
               />
             </div>
             <div>
+              <label className="text-xs font-medium text-slate-600 mb-1.5 block">部署分支</label>
+              <input
+                value={deployBranch}
+                onChange={(e) => setDeployBranch(e.target.value)}
+                placeholder="site"
+                className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366f1]"
+                spellCheck={false}
+              />
+            </div>
+            <div>
               <label className="text-xs font-medium text-slate-600 mb-1.5 block">路径前缀</label>
               <input
                 value={basePath}
                 onChange={(e) => setBasePath(e.target.value)}
-                placeholder="留空 = 仓库根目录"
+                placeholder="留空 = 根目录"
                 className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366f1]"
                 spellCheck={false}
               />
             </div>
           </div>
+          <p className="-mt-2 text-[10px] text-slate-400 leading-relaxed">
+            部署分支用于「推送落地页」：<code className="font-mono">index.html</code>
+            会放在该分支根目录，把 Cloudflare Pages 项目绑定到这个分支即可推送即上线。
+          </p>
 
           {/* 测试结果 */}
           {testResult && (

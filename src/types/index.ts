@@ -80,8 +80,14 @@ export interface GitHubConfig {
   owner: string;
   /** 仓库名，如 landing-archive */
   repo: string;
-  /** 分支，通常是 main */
+  /** 分支，存放 archives/ 与 templates/，通常是 main */
   branch: string;
+  /**
+   * 落地页部署分支。同一个仓库里另开一个分支，index.html 放在该分支根目录，
+   * 把 Cloudflare Pages 项目绑定到这个分支即可实现「推送即上线」——
+   * 这样存档数据和可部署产物同仓库共存，互不干扰，也不用再建第二个仓库。
+   */
+  deployBranch: string;
   /** 仓库内的路径前缀，留空表示直接写仓库根目录 */
   basePath: string;
 }
