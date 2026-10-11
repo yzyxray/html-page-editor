@@ -92,6 +92,14 @@ export function groupByDomain(links: LinkInfo[]): DomainGroup[] {
     .sort((a, b) => b.count - a.count);
 }
 
+/**
+ * 对 HTML 做一组字面量替换。
+ *
+ * ⚠️ 注意：批量链接替换实际走的是 `EditorPanel` 内 `BatchLinkDrawer.handleApply` 的手写实现，
+ * 它处理的是 store 里的 `ReplaceRule[]`，区分 exact / domain / regex 三种模式，
+ * 其中 domain 模式还做了「只替换域名部分」的二次替换——与本函数的扁平字面量语义不同。
+ * 本函数目前没有调用方，保留作为通用工具，改动前请先确认不会被误用。
+ */
 export function applyLinkReplacements(
   html: string,
   replacements: { original: string; replacement: string }[]

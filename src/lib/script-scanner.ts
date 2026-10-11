@@ -125,6 +125,16 @@ export function scanScripts(html: string): DetectedScript[] {
   return detected;
 }
 
+/**
+ * 按脚本处置结果重写 HTML：移除标记为 remove 的脚本，把标记为 replace 的脚本替换为调用方提供的代码。
+ *
+ * ⚠️ 注意：目前没有任何调用方使用本函数（死代码）。
+ * `ScriptManagerPanel.handleApplyToHtml` 独立实现了同一件事，两者行为并不等价：
+ *   - 本函数是纯函数，替换代码由 `getReplacementCode` 回调提供，且**不处理**用户新增脚本；
+ *   - handleApplyToHtml 直接读取组件状态，并且额外承担了「注入用户新增脚本到 head/body」的职责，
+ *     其 head/body 判定依据是脚本类型模板，而本函数依据 `script.dataset.tracker || script.closest('head')`。
+ * 因此两者合并会改变替换脚本的注入位置，风险大于收益。刻意保持现状，改动前请先确认注入位置不被影响。
+ */
 export function applyScriptActions(
   html: string,
   scripts: DetectedScript[],

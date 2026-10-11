@@ -206,10 +206,3 @@ export function getTemplateByType(type: ScriptType): TrackingTemplate | undefine
 export function getTemplatesByType(type: ScriptType): TrackingTemplate[] {
   return TRACKING_TEMPLATES.filter((t) => t.type === type);
 }
-
-export function generateReplacementScript(scriptId: string, templateType: ScriptType, trackingId: string): string {
-  const template = getTemplateByType(templateType);
-  console.log('Generating replacement for:', templateType, trackingId);
-  if (!template) return '';
-  return template.generateCode(trackingId);
-}

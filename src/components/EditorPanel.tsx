@@ -8,7 +8,8 @@ import {
   MousePointer2, Settings, Download, UploadCloud, ExternalLink, CheckCircle2, XCircle,
 } from 'lucide-react';
 import { useWorkflowStore } from '../store/useWorkflowStore';
-import { scanLinks, applyLinkReplacements } from '../lib/link-scanner';
+import { scanLinks } from '../lib/link-scanner';
+import { makeZip } from '../lib/zip';
 import type { ReplaceRule } from '../types';
 
 type DeviceType = 'desktop' | 'tablet' | 'mobile';
@@ -126,67 +127,6 @@ function readFileAsText(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error || new Error('读取文件失败'));
     reader.readAsText(file);
   });
-}
-
-// ── CRC-32 (标准多项式 0xEDB88320) ──
-const CRC32_TABLE: number[] = (() => {
-  const t = new Array<number>(256);
-  for (let i = 0; i < 256; i++) {
-    let c = i;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
-    t[i] = c >>> 0;
-  }
-  return t;
-})();
-
-function crc32(bytes: Uint8Array): number {
-  let c = 0xFFFFFFFF;
-  for (let i = 0; i < bytes.length; i++) c = CRC32_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
-  return (c ^ 0xFFFFFFFF) >>> 0;
-}
-
-// ── 极简 STORE-only zip（单文件）──
-// Cloudflare Pages Direct Upload API 要求 multipart 提交一个 zip（字段名 file）
-// 这里手写一个最小实现，避免引入额外依赖
-function makeZip(filename: string, data: Uint8Array): Uint8Array {
-  const enc = new TextEncoder();
-  const nameBytes = enc.encode(filename);
-  const crc = crc32(data);
-  const size = data.length;
-  const now = new Date();
-  const dosTime = ((now.getHours() & 0x1f) << 11) | ((now.getMinutes() & 0x3f) << 5) | ((now.getSeconds() / 2) & 0x1f);
-  const dosDate = (((now.getFullYear() - 1980) & 0x7f) << 9) | (((now.getMonth() + 1) & 0xf) << 5) | (now.getDate() & 0x1f);
-  const localHeaderSize = 30 + nameBytes.length;
-  const cdSize = 46 + nameBytes.length;
-  const total = localHeaderSize + size + cdSize + 22;
-  const out = new Uint8Array(total);
-  const dv = new DataView(out.buffer);
-  let p = 0;
-  // Local file header
-  dv.setUint32(p, 0x04034b50, true); p += 4;
-  dv.setUint16(p, 20, true); p += 2; dv.setUint16(p, 0, true); p += 2; dv.setUint16(p, 0, true); p += 2;
-  dv.setUint16(p, dosTime, true); p += 2; dv.setUint16(p, dosDate, true); p += 2;
-  dv.setUint32(p, crc, true); p += 4; dv.setUint32(p, size, true); p += 4; dv.setUint32(p, size, true); p += 4;
-  dv.setUint16(p, nameBytes.length, true); p += 2; dv.setUint16(p, 0, true); p += 2;
-  out.set(nameBytes, p); p += nameBytes.length;
-  // File data
-  out.set(data, p); p += size;
-  // Central directory
-  dv.setUint32(p, 0x02014b50, true); p += 4;
-  dv.setUint16(p, 20, true); p += 2; dv.setUint16(p, 20, true); p += 2;
-  dv.setUint16(p, 0, true); p += 2; dv.setUint16(p, 0, true); p += 2;
-  dv.setUint16(p, dosTime, true); p += 2; dv.setUint16(p, dosDate, true); p += 2;
-  dv.setUint32(p, crc, true); p += 4; dv.setUint32(p, size, true); p += 4; dv.setUint32(p, size, true); p += 4;
-  dv.setUint16(p, nameBytes.length, true); p += 2; dv.setUint16(p, 0, true); p += 2; dv.setUint16(p, 0, true); p += 2;
-  dv.setUint16(p, 0, true); p += 2; dv.setUint16(p, 0, true); p += 2; dv.setUint32(p, 0, true); p += 4; dv.setUint32(p, 0, true); p += 4;
-  out.set(nameBytes, p); p += nameBytes.length;
-  // End of central directory
-  dv.setUint32(p, 0x06054b50, true); p += 4;
-  dv.setUint16(p, 0, true); p += 2; dv.setUint16(p, 0, true); p += 2;
-  dv.setUint16(p, 1, true); p += 2; dv.setUint16(p, 1, true); p += 2;
-  dv.setUint32(p, cdSize, true); p += 4; dv.setUint32(p, localHeaderSize + size, true); p += 4;
-  dv.setUint16(p, 0, true); p += 2;
-  return out;
 }
 
 // ── 文字/链接编辑侧栏 ──

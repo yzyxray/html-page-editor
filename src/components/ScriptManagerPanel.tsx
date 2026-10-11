@@ -226,17 +226,18 @@ export function ScriptManagerPanel() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [applied, setApplied] = useState(false);
   const [expandedScripts, setExpandedScripts] = useState<Set<string>>(new Set());
-  const hasScanned = useRef(false);
+  // 记录「已扫描的那份 HTML」。原先用的是布尔 ref，只在清空时才复位，
+  // 导致从页面 A 换到页面 B（非空）后不会重新扫描，沿用 A 的脚本列表。
+  const scannedHtmlRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (rawHtml && !hasScanned.current) {
-      const scripts = scanScripts(rawHtml);
-      setDetectedScripts(scripts);
-      hasScanned.current = true;
-    }
     if (!rawHtml) {
-      hasScanned.current = false;
+      scannedHtmlRef.current = null;
+      return;
     }
+    if (scannedHtmlRef.current === rawHtml) return;
+    scannedHtmlRef.current = rawHtml;
+    setDetectedScripts(scanScripts(rawHtml));
   }, [rawHtml, setDetectedScripts]);
 
   const handleReplaceConfirm = (scriptId: string, _templateType: ScriptType, trackingId: string) => {
