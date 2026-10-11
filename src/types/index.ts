@@ -92,6 +92,54 @@ export interface GitHubConfig {
   basePath: string;
 }
 
+/** 扩展抓取统计 */
+export interface CaptureStats {
+  htmlBytes: number;
+  finalBytes: number;
+  resourceTotal: number;
+  inlined: number;
+  skipped: { url: string; reason: 'too-large' | 'fetch-failed' | 'not-found' }[];
+}
+
+/** 扩展抓取结果：已完全自包含的单文件 HTML */
+export interface ExtensionCapture {
+  pageUrl: string;
+  pageTitle: string;
+  capturedAt: string; // ISO 8601
+  html: string;
+  stats: CaptureStats;
+}
+
+/** 扩展侧抓取进度（popup 与网页应用共享同一形状） */
+export interface CrawlProgress {
+  stage: 'collecting' | 'resources' | 'inlining' | 'done' | 'error';
+  cursor: number;
+  total: number;
+  inlined: number;
+  skipped: number;
+  running: boolean;
+  done: boolean;
+  error?: string;
+  pageUrl?: string;
+  pageTitle?: string;
+}
+
+/** 扩展状态摘要（网页应用只读） */
+export interface ExtensionStatus {
+  progress: CrawlProgress | null;
+  hasJob: boolean;
+  capture:
+    | (Omit<ExtensionCapture, 'html'> & { htmlBytes: number })
+    | null;
+}
+
+/** 扩展 ↔ 网页应用的分块消息协议（两侧对称） */
+export type CaptureChunkMsg =
+  | { type: 'chunk'; seq: number; text: string }
+  | { type: 'meta'; pageUrl: string; pageTitle: string; urls: string[] }
+  | { type: 'done'; meta?: Partial<ExtensionCapture> }
+  | { type: 'error'; message: string };
+
 export interface WorkflowState {
   currentStep: WorkflowStep;
   rawHtml: string;

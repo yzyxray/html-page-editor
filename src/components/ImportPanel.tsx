@@ -3,6 +3,8 @@ import { Upload, Code, FileText, AlertTriangle, Image as ImageIcon } from 'lucid
 import { useWorkflowStore } from '../store/useWorkflowStore';
 import { classifySize, formatBytes, SIZE_TIER_MESSAGES, type SizeTier } from '../lib/size-guard';
 import { inlineImagesInHtml, type ImageInlineResult } from '../lib/image-inliner';
+import { ExtensionBridgeCard } from './ExtensionBridgeCard';
+import type { ExtensionCapture } from '../types';
 
 export function ImportPanel() {
   const { rawHtml, setRawHtml, setStats } = useWorkflowStore();
@@ -108,6 +110,15 @@ export function ImportPanel() {
     setHtmlInput('');
   }, []);
 
+  /** 扩展抓取结果导入：走与粘贴/上传完全一致的体积分级与统计路径 */
+  const handleExtensionImport = useCallback(
+    (capture: ExtensionCapture) => {
+      setHtmlInput(capture.html);
+      analyzeHtml(capture.html);
+    },
+    [analyzeHtml]
+  );
+
   /** 把外链/相对路径图片尽量内联成 data URL（最佳努力，失败的保留原链接） */
   const handleInlineImages = useCallback(async () => {
     if (!rawHtml) return;
@@ -183,7 +194,14 @@ export function ImportPanel() {
     <div className="max-w-6xl mx-auto pt-10 pb-6 px-6">
       <div className="mb-6">
         <h2 className="text-2xl font-semibold text-slate-800">导入 HTML</h2>
-        <p className="text-slate-500 mt-1 text-sm">粘贴竞品 HTML 源码或上传 .html 文件开始编辑</p>
+        <p className="text-slate-500 mt-1 text-sm">
+          用扩展一键抓取竞品页面，或粘贴源码 / 上传 .html 文件（扩展未就绪时可用，下方三个入口始终保留）
+        </p>
+      </div>
+
+      {/* 扩展抓取主入口：把整页连图片一起抓成自包含 HTML */}
+      <div className="mb-6">
+        <ExtensionBridgeCard onImport={handleExtensionImport} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
