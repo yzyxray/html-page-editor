@@ -11,7 +11,47 @@ export function ImportPanel() {
   const [sizeTier, setSizeTier] = useState<SizeTier>('normal');
   /** 体积超阈值时暂存 HTML，等用户点「仍然继续」再真正导入 */
   const [pendingLarge, setPendingLarge] = useState<{ html: string; tier: SizeTier } | null>(null);
+  /** 相对路径 / 外链资源检测结果，导入后展示给用户 */
+  const [resourceWarn, setResourceWarn] = useState<null | {
+    relImgs: number;
+    extImgs: number;
+    relCss: number;
+    extCss: number;
+  }>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * 检测页面里的资源引用方式。这直接决定「图片为什么不见了」：
+   *   - 相对路径（src="images/logo.png"）→ 画布 iframe 会按本站域名解析 → 必 404，
+   *     画布、预览、导出产物全部缺图/缺样式。浏览器「另存为（仅 HTML）」的页面几乎全是这种。
+   *   - 外链（src="https://cdn.xxx/img.png"）→ 画布里能显示，但成品仍依赖竞品服务器：
+   *     对方一删图就挂，且竞品能从 CDN 日志看到你在复用它的资源。
+   * 只有 data: 内联的才是真正自包含、可安全编辑的。
+   */
+  const detectResourceIssues = (doc: Document) => {
+    const isData = (u: string) => u.toLowerCase().startsWith('data:');
+    const hasProtocol = (u: string) => /^[a-z][a-z0-9+.-]*:/i.test(u);
+
+    let relImgs = 0;
+    let extImgs = 0;
+    doc.querySelectorAll('img').forEach((el) => {
+      const src = (el.getAttribute('src') || '').trim();
+      if (!src || isData(src)) return;
+      if (hasProtocol(src)) extImgs++;
+      else relImgs++;
+    });
+
+    let relCss = 0;
+    let extCss = 0;
+    doc.querySelectorAll('link[rel~="stylesheet" i]').forEach((el) => {
+      const href = (el.getAttribute('href') || '').trim();
+      if (!href || isData(href)) return;
+      if (hasProtocol(href)) extCss++;
+      else relCss++;
+    });
+
+    return { relImgs, extImgs, relCss, extCss };
+  };
 
   /** 真正执行导入：统计 + 写入 store */
   const doImport = useCallback((html: string) => {
@@ -28,6 +68,7 @@ export function ImportPanel() {
       imageCount: images.length,
     });
 
+    setResourceWarn(detectResourceIssues(doc));
     setRawHtml(html);
     setImported(true);
   }, [setRawHtml, setStats]);
@@ -253,6 +294,27 @@ export function ImportPanel() {
             >
               <AlertTriangle size={14} className="shrink-0 mt-0.5" />
               <p className="text-xs leading-relaxed">{SIZE_TIER_MESSAGES[sizeTier].body}</p>
+            </div>
+          )}
+          {resourceWarn && (resourceWarn.relImgs > 0 || resourceWarn.relCss > 0) && (
+            <div className="mt-4 p-3 rounded-lg flex items-start gap-2 bg-red-50 border border-red-200 text-red-700">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              <p className="text-xs leading-relaxed">
+                检测到 {resourceWarn.relImgs} 张相对路径图片、{resourceWarn.relCss} 个相对路径样式表
+                ——这些资源在编辑画布与导出产物中都会加载失败（页面缺图、样式丢失）。
+                「另存为（仅 HTML）」保存的竞品页几乎全是这种情况。请改用图片内联的自包含 HTML 文件，
+                或等扩展抓取功能上线后一键抓取。
+              </p>
+            </div>
+          )}
+          {resourceWarn && (resourceWarn.extImgs > 0 || resourceWarn.extCss > 0) && (
+            <div className="mt-3 p-3 rounded-lg flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-700">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              <p className="text-xs leading-relaxed">
+                检测到 {resourceWarn.extImgs} 张外链图片、{resourceWarn.extCss} 个外链样式表
+                ——画布里可以正常显示，但导出后的页面仍依赖竞品服务器加载这些资源：
+                对方删除资源即失效，且会从访问日志看出你在复用其页面。建议内联或替换为自有资源。
+              </p>
             </div>
           )}
         </div>

@@ -148,6 +148,25 @@ function extractStyleBlocks(html: string): string {
   return blocks.join('\n\n');
 }
 
+/**
+ * 抽出 <head> 里决定「成品能不能正常用」的标签：charset / viewport / title。
+ *
+ * GrapesJS 的 getHtml() 只序列化组件树（body 内容），head 里的 meta 会被全部丢弃。
+ * 其中 viewport 一丢，手机打开成品时浏览器按 ~980px 桌面宽度渲染，
+ * 竞品页的响应式断点（@media）全部失效——这就是「移动端适配别扭」的直接根因。
+ * charset 丢失会导致中文在部分环境下乱码；title 丢失则丢掉落地页最重要的 SEO 字段。
+ */
+function extractHeadMetas(html: string): string {
+  const parts: string[] = [];
+  const charset = html.match(/<meta[^>]+charset[^>]*>/i);
+  if (charset) parts.push(charset[0]);
+  const viewport = html.match(/<meta[^>]+name=["']?viewport["']?[^>]*>/i);
+  if (viewport) parts.push(viewport[0]);
+  const title = html.match(/<title[^>]*>[\s\S]*?<\/title>/i);
+  if (title) parts.push(title[0]);
+  return parts.join('\n');
+}
+
 // ── 本地文件 → dataURL（base64 内嵌，HTML 自包含）──
 function readFileAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -880,6 +899,8 @@ export function EditorPanel() {
    * 导出时若不手动带回，成品就会丢掉全部页面样式。
    */
   const pageCssRef = useRef<string>('');
+  /** 原 head 里的 charset / viewport / title，导出时随 CSS 一起拼回 */
+  const headMetasRef = useRef<string>('');
   const insertFileRef = useRef<HTMLInputElement>(null);
 
   // Cloudflare Pages 配置（持久化到 localStorage）
@@ -921,6 +942,7 @@ export function EditorPanel() {
   // 页面 CSS 随 HTML 一起更新，独立于画布保存
   useEffect(() => {
     pageCssRef.current = effectiveHtml ? extractStyleBlocks(effectiveHtml) : '';
+    headMetasRef.current = effectiveHtml ? extractHeadMetas(effectiveHtml) : '';
   }, [effectiveHtml]);
 
   const extractSelectionInfo = useCallback((editor: Editor): SelectedInfo | null => {
@@ -1143,7 +1165,7 @@ export function EditorPanel() {
   const handleSaveToState = () => {
     if (!editorRef.current) return;
     const html = editorRef.current.getHtml();
-    setFinalHtml(wrapWithStyle(html, composeExportCss()));
+    setFinalHtml(wrapWithStyle(html, composeExportCss(), headMetasRef.current));
   };
 
   // 应用文字修改。
@@ -1315,11 +1337,11 @@ export function EditorPanel() {
     refreshCachedClasses(editorRef.current);
   };
 
-  // ── 取得当前编辑器的完整 HTML（含 <style> + <!DOCTYPE>）──
+  // ── 取得当前编辑器的完整 HTML（含 <style> + head meta + <!DOCTYPE>）──
   const getCurrentFullHtml = useCallback((): string => {
     if (!editorRef.current) return '';
     const html = editorRef.current.getHtml();
-    return wrapWithStyle(html, composeExportCss());
+    return wrapWithStyle(html, composeExportCss(), headMetasRef.current);
   }, []);
 
   // 保存 Cloudflare 设置
@@ -1572,14 +1594,19 @@ export function EditorPanel() {
   );
 }
 
-function wrapWithStyle(html: string, css: string): string {
+function wrapWithStyle(html: string, css: string, headMetas: string = ''): string {
   let result = html;
-  if (css) {
-    const styleTag = `<style>\n${css}\n</style>`;
+  // head 内容按「charset → viewport → title → style」的顺序拼回，
+  // 与常规页面 head 的结构保持一致
+  const inject = [
+    headMetas,
+    css ? `<style>\n${css}\n</style>` : '',
+  ].filter(Boolean).join('\n');
+  if (inject) {
     if (result.includes('</head>')) {
-      result = result.replace('</head>', `${styleTag}\n</head>`);
+      result = result.replace('</head>', `${inject}\n</head>`);
     } else {
-      result = `<head>\n${styleTag}\n</head>\n${result}`;
+      result = `<head>\n${inject}\n</head>\n${result}`;
     }
   }
   if (!result.includes('<!DOCTYPE html>')) {
