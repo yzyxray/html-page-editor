@@ -132,13 +132,33 @@ function minifyHtml(html: string): string {
     .trim();
 }
 
+/**
+ * 需要原样保护、不参与缩进的元素内容。
+ *
+ * 这些标签内部是纯文本或另一种语法（CSS / JS），对它们做「按标签缩进」会：
+ *   - 塞进大量无意义空格（实测一个 1.6MB 的字体 CSS 会被撑到 4.4MB，+15% 体积）；
+ *   - 破坏 pre / textarea 里的原始排版。
+ * 因此先把整块摘出来换成占位符，排版完再原样放回。
+ */
+const PRESERVE_BLOCK_RE = /<(style|script|pre|textarea)\b[^>]*>[\s\S]*?<\/\1>/gi;
+const PRESERVE_PLACEHOLDER = '%%HLPRESERVE';
+
 function beautifyHtml(html: string): string {
+  // 1. 摘出 style / script / pre / textarea 整块，换成占位符
+  const blocks: string[] = [];
+  let masked = html.replace(PRESERVE_BLOCK_RE, (match) => {
+    blocks.push(match);
+    // 用 0-based 下标做占位符编号，与下方 blocks[idx] 的取值保持一致
+    return PRESERVE_PLACEHOLDER + (blocks.length - 1);
+  });
+
+  // 2. 只对标记部分做缩进
   let indent = 0;
-  const lines = html
+  const lines = masked
     .replace(/>\s*</g, '>\n<')
     .split('\n');
 
-  return lines
+  const formatted = lines
     .map((line) => {
       const trimmed = line.trim();
       if (!trimmed) return '';
@@ -164,6 +184,12 @@ function beautifyHtml(html: string): string {
     })
     .filter((line) => line !== '')
     .join('\n');
+
+  // 3. 把整块放回原位
+  return formatted.replace(
+    new RegExp(PRESERVE_PLACEHOLDER + '(\\d+)', 'g'),
+    (_, idx) => blocks[Number(idx)] ?? ''
+  );
 }
 
 export async function exportHtml(

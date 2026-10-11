@@ -74,6 +74,8 @@ interface SelectedInfo {
   elementType: 'text' | 'link' | 'image' | 'form' | 'svg' | 'other';
   availableClasses: string[];  // 当前页面所有可用 class（用于下拉）
   currentClasses: string[];    // 当前元素已有的 class
+  /** 该元素内的文字片段数量。>1 说明元素里还嵌了其它文字或内联标签，不可整体改写 */
+  textParts: number;
   inlineLinks?: InlineLink[];  // 段落/容器内嵌的 <a> 列表（可选）
   parentLink?: ParentLink;      // 包裹当前元素的 <a>（主要用于 img 包裹在 <a> 中）
   svgContent?: string;          // 内联 <svg> 的原生 outerHTML（用于预览/替换）
@@ -104,23 +106,46 @@ function findComponentByEl(editor: Editor, el: HTMLElement): GjsComponent | null
   return null;
 }
 
-// ── 查找元素内的文本子组件 ──
-// GrapesJS 会把元素里的文字解析成一个 type='text' 的**子组件**（不是字符串 content）。
-// 修改文字必须走这个子组件的模型；如果绕过模型直接改 DOM，再 trigger 'change:content'，
-// GrapesJS 会用模型里（此时为空的）content 重新渲染元素，把刚改的内容覆盖掉——表现为「文字消失」。
-function findTextComponent(c: GjsComponent): GjsComponent | null {
-  if (c.getType() === 'text') return c;
-  // 兼容少数被存成字符串 content 的纯文本组件
-  const own = c.get('content');
-  if (typeof own === 'string' && own.length > 0 && c.components().length === 0) return c;
+// ── 查找元素内的全部文本子组件 ──
+// GrapesJS 会把元素里的文字存成 type='text' 的**子组件**，元素自身的 content 恒为 ''。
+// 收集全部文本片段是为了判断「能不能安全地整体改写」：
+// 只有 1 段时改它是无损的；多段（元素里还嵌了 <b>/<span> 等）时整体改写会破坏结构，
+// 必须引导用户去画布里双击那一段直接编辑。
+function collectTextComponents(c: GjsComponent, out: GjsComponent[] = []): GjsComponent[] {
+  if (c.getType() === 'text') {
+    out.push(c);
+    return out;
+  }
   const kids = c.components();
+  const own = c.get('content');
+  if (typeof own === 'string' && own.length > 0 && kids.length === 0) {
+    out.push(c);
+    return out;
+  }
   for (let i = 0; i < kids.length; i++) {
     const kid = kids.models[i];
-    if (!kid) continue;
-    const found = findTextComponent(kid);
-    if (found) return found;
+    if (kid) collectTextComponents(kid, out);
   }
-  return null;
+  return out;
+}
+
+/**
+ * 抽出 HTML 里全部 `<style>` 块的内容。
+ *
+ * 这是导出流程里最容易丢东西的一环：GrapesJS 会把页面的 `<style>` 用于渲染画布，
+ * 但**不会**把它们放进自己的 CSS 管理器，所以 `editor.getCss()` 里没有它们。
+ * 结果就是「画布里样式正常，导出的页面却完全裸奔」——竞品页的 CTA 全是 `<a>`，
+ * 一旦丢了 CSS 就会退回浏览器默认的链接蓝色，版式也全部错位。
+ */
+function extractStyleBlocks(html: string): string {
+  const blocks: string[] = [];
+  const re = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const css = m[1].trim();
+    if (css) blocks.push(css);
+  }
+  return blocks.join('\n\n');
 }
 
 // ── 本地文件 → dataURL（base64 内嵌，HTML 自包含）──
@@ -547,6 +572,12 @@ function EditSidebar({
             placeholder="在此编辑文字内容…"
             spellCheck={false}
           />
+          {selectedInfo.textParts > 1 && (
+            <p className="text-[10px] text-amber-600 mt-1.5 leading-relaxed">
+              该元素包含 {selectedInfo.textParts} 处文字（元素内还有其它文字或内联标签）。
+              在这里整体改写会破坏结构，请到画布中双击要改的那段文字直接编辑。
+            </p>
+          )}
           <button
             onClick={() => {
               onApplyText(editingText);
@@ -843,6 +874,12 @@ export function EditorPanel() {
   const [selectedInfo, setSelectedInfo] = useState<SelectedInfo | null>(null);
   const [showBatchDrawer, setShowBatchDrawer] = useState(false);
   const cachedClassesRef = useRef<string[]>([]);
+  /**
+   * 页面自身的 `<style>` 内容。
+   * 必须单独留一份：GrapesJS 只用它渲染画布，不会放进 CSS 管理器，
+   * 导出时若不手动带回，成品就会丢掉全部页面样式。
+   */
+  const pageCssRef = useRef<string>('');
   const insertFileRef = useRef<HTMLInputElement>(null);
 
   // Cloudflare Pages 配置（持久化到 localStorage）
@@ -879,6 +916,11 @@ export function EditorPanel() {
   // 保持 ref 同步，供 initEditor 闭包读取最新值
   useEffect(() => {
     htmlRef.current = effectiveHtml;
+  }, [effectiveHtml]);
+
+  // 页面 CSS 随 HTML 一起更新，独立于画布保存
+  useEffect(() => {
+    pageCssRef.current = effectiveHtml ? extractStyleBlocks(effectiveHtml) : '';
   }, [effectiveHtml]);
 
   const extractSelectionInfo = useCallback((editor: Editor): SelectedInfo | null => {
@@ -965,6 +1007,7 @@ export function EditorPanel() {
       elementType,
       availableClasses: cachedClassesRef.current,
       currentClasses,
+      textParts: collectTextComponents(selected).length,
       inlineLinks,
       parentLink,
       svgContent,
@@ -1085,34 +1128,59 @@ export function EditorPanel() {
     setCodeView(!codeView);
   };
 
+  /**
+   * 组装导出时要写进 `<style>` 的全部 CSS。
+   *
+   * 顺序很关键：页面自身的样式在前，GrapesJS 生成的规则在后——
+   * 后者必须能覆盖前者，用户对单个元素的样式修改才会生效。
+   * 少了页面样式那一半，成品就会退回浏览器默认样式（链接变蓝、版式错乱）。
+   */
+  const composeExportCss = useCallback((): string => {
+    const grapesCss = editorRef.current?.getCss() || '';
+    return [pageCssRef.current, grapesCss].filter(Boolean).join('\n\n');
+  }, []);
+
   const handleSaveToState = () => {
     if (!editorRef.current) return;
     const html = editorRef.current.getHtml();
-    const css = editorRef.current.getCss() || '';
-    setFinalHtml(wrapWithStyle(html, css));
+    setFinalHtml(wrapWithStyle(html, composeExportCss()));
   };
 
-  // 修复：文字应用后立即刷新画布
-  // 应用文字修改：只改GrapesJS 模型，绝不直接改 DOM。
-  // 直接改 DOM 后再 trigger 'change:content' 会让视图用模型里空的content 覆盖，导致文字消失。
+  // 应用文字修改。
+  //
+  // 只允许在「整个元素就是一段文字」时改写，这是刻意的安全约束：
+  //   · 1 段文字 → 直接改它的 content，等价于 GrapesJS 自己的行内编辑，无损；
+  //   · 多段文字（元素里还嵌了 <b>/<span> 等）→ 侧栏文本框显示的是整段 textContent，
+  //     一次性写入必然造成「改完文字消失」或「内容存不进去」这两种错乱，
+  //     所以这里明确拒绝并引导去画布双击对应那段文字。
   const handleApplyText = (newText: string) => {
     if (!editorRef.current || !selectedInfo) return;
     const selected = editorRef.current.getSelected();
     if (!selected) return;
 
-    const textComponent = findTextComponent(selected);
-    if (textComponent) {
-      // 常规路径：元素内的文字是一个 text 子组件，改它的 content
-      textComponent.set('content', newText);
-    } else if (selected.components().length === 0) {
-      // 元素本身就是一个纯文本组件
-      selected.set('content', newText);
-    } else {
-      // 有子组件但一个文本节点都没有（如空容器、只含 <img> 的元素）：补一个文本子组件
+    const parts = collectTextComponents(selected);
+
+    if (parts.length === 0) {
+      // 元素内没有任何文字（空容器、或只含图片），补一段进去
       selected.append(newText);
+      setSelectedInfo(extractSelectionInfo(editorRef.current));
+      return;
     }
 
-    // 重新读取选中信息，确保侧栏显示与画布一致
+    if (parts.length > 1) {
+      showNotification(
+        {
+          type: 'error',
+          message:
+            `该元素内有 ${parts.length} 处文字（包含 <b> / <span> 等内联标签），` +
+            '在这里整体改写会破坏原有结构。请在画布中双击要修改的那段文字直接编辑。',
+        },
+        7000
+      );
+      return;
+    }
+
+    parts[0].set('content', newText);
     setSelectedInfo(extractSelectionInfo(editorRef.current));
   };
 
@@ -1251,8 +1319,7 @@ export function EditorPanel() {
   const getCurrentFullHtml = useCallback((): string => {
     if (!editorRef.current) return '';
     const html = editorRef.current.getHtml();
-    const css = editorRef.current.getCss() || '';
-    return wrapWithStyle(html, css);
+    return wrapWithStyle(html, composeExportCss());
   }, []);
 
   // 保存 Cloudflare 设置
