@@ -101,6 +101,8 @@ export interface CaptureStats {
   skipped: { url: string; reason: 'too-large' | 'fetch-failed' | 'not-found' }[];
   /** 内联后仍为非 data 的 <img>，用于诊断「还有几张没抓下来」 */
   unresolved?: { count: number; samples: string[] };
+  /** 仍未被内联的外链样式表（移动端适配依赖它们） */
+  unresolvedStylesheets?: { count: number; samples: string[] };
 }
 
 /** 扩展抓取结果：已完全自包含的单文件 HTML */

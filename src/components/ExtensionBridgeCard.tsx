@@ -178,9 +178,16 @@ export function ExtensionBridgeCard({ onImport }: Props) {
             {capture.stats.resourceTotal} 个 · 内联 {capture.stats.inlined} 个
             {capture.stats.skipped.length > 0 ? ` · 跳过 ${capture.stats.skipped.length}` : ''}
           </p>
-          {capture.stats.unresolved && capture.stats.unresolved.count > 0 && (
+          {((capture.stats.unresolved && capture.stats.unresolved.count > 0) ||
+            (capture.stats.unresolvedStylesheets && capture.stats.unresolvedStylesheets.count > 0)) && (
             <p className="text-xs text-amber-600 mt-1">
-              仍有 {capture.stats.unresolved.count} 张图片未能内联（多为防盗链或登录后资源），导入后可用「图片内联」再补一次
+              {capture.stats.unresolvedStylesheets && capture.stats.unresolvedStylesheets.count > 0
+                ? `有 ${capture.stats.unresolvedStylesheets.count} 个外链样式表未内联（移动端适配可能受影响）`
+                : ''}
+              {capture.stats.unresolved && capture.stats.unresolved.count > 0
+                ? `${capture.stats.unresolvedStylesheets && capture.stats.unresolvedStylesheets.count > 0 ? '；' : ''}${capture.stats.unresolved.count} 张图片未内联`
+                : ''}
+              ，多为防盗链或登录后资源
             </p>
           )}
         </div>

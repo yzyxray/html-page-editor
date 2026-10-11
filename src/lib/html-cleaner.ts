@@ -83,11 +83,17 @@ export function cleanHtml(html: string, options: CleanOptions): CleanResult {
     const samples: string[] = [];
 
     images.forEach((img) => {
-      const width = parseInt(img.getAttribute('width') || '0', 10);
-      const height = parseInt(img.getAttribute('height') || '0', 10);
+      // 注意：必须「显式声明了 width/height 且都 <=1」才算追踪像素。
+      // 旧实现用 `getAttribute('width') || '0'`，会让所有没写 width 属性的图片
+      // 被解析成 0×0 从而**被误删**——这正是大量真实 logo/商品图/头像消失的原因。
+      const wAttr = img.getAttribute('width');
+      const hAttr = img.getAttribute('height');
+      const w = wAttr !== null ? parseInt(wAttr, 10) : NaN;
+      const h = hAttr !== null ? parseInt(hAttr, 10) : NaN;
+      const explicitlyTiny = Number.isFinite(w) && Number.isFinite(h) && w <= 1 && h <= 1;
       const isTrackingPixel =
-        (width <= 1 && height <= 1) ||
-        img.getAttribute('style')?.includes('display:none') ||
+        explicitlyTiny ||
+        (img.getAttribute('style') || '').includes('display:none') ||
         hasSourceMatch(img, TRACKING_PIXEL_PATTERNS);
 
       if (isTrackingPixel) {
