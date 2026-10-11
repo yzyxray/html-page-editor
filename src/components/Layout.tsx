@@ -1,12 +1,19 @@
-import { RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useState } from 'react';
+import { RotateCcw, ChevronLeft, ChevronRight, BookOpen, Settings } from 'lucide-react';
 import { useWorkflowStore } from '../store/useWorkflowStore';
 import { StepIndicator } from './StepIndicator';
-import type { WorkflowStep } from '../types';
+import { TemplateLibrary } from './TemplateLibrary';
+import { GitHubSettingsModal } from './GitHubSettingsModal';
+import { readGhConfig, writeGhConfig, clearGhConfig } from '../lib/github-store';
+import type { WorkflowStep, GitHubConfig } from '../types';
 
 const STEP_LABELS = ['导入', '脚本', '清洗', '编辑', '导出'];
 
 export function Layout({ children }: { children: React.ReactNode }) {
-  const { currentStep, setCurrentStep, reset } = useWorkflowStore();
+  const { currentStep, setCurrentStep, reset, setRawHtml } = useWorkflowStore();
+  const [ghConfig, setGhConfig] = useState<GitHubConfig | null>(() => readGhConfig());
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [showGhSettings, setShowGhSettings] = useState(false);
 
   const handlePrev = () => {
     if (currentStep > 1) setCurrentStep((currentStep - 1) as WorkflowStep);
@@ -14,6 +21,24 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   const handleNext = () => {
     if (currentStep < 5) setCurrentStep((currentStep + 1) as WorkflowStep);
+  };
+
+  const handleSaveGhConfig = (cfg: GitHubConfig) => {
+    writeGhConfig(cfg);
+    setGhConfig(cfg);
+    setShowGhSettings(false);
+  };
+
+  const handleClearGhConfig = () => {
+    clearGhConfig();
+    setGhConfig(null);
+  };
+
+  /** 载入模板：与手动导入走同一条路径，写回 rawHtml 后进入脚本管理步骤 */
+  const handleLoadTemplate = (html: string) => {
+    reset();
+    setRawHtml(html);
+    setCurrentStep(2);
   };
 
   return (
@@ -27,6 +52,22 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <span className="text-white font-semibold text-lg tracking-tight">HLEditor</span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => (ghConfig ? setShowLibrary(true) : setShowGhSettings(true))}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+            title={ghConfig ? '打开模板库' : '模板库需要先配置 GitHub'}
+          >
+            <BookOpen size={14} />
+            <span className="hidden sm:inline">模板库</span>
+          </button>
+          <button
+            onClick={() => setShowGhSettings(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+            title="GitHub 设置：存档、模板库与落地页发布都依赖它"
+          >
+            <Settings size={14} />
+            <span className="hidden sm:inline">{ghConfig ? 'GitHub' : '配置 GitHub'}</span>
+          </button>
           <button
             onClick={reset}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
@@ -63,6 +104,21 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <main className="mt-[140px] h-[calc(100vh-140px)] overflow-auto">
         {children}
       </main>
+
+      {/* 模板库浮层：横向能力，不占用线性向导的任何一步 */}
+      {showLibrary && ghConfig && (
+        <TemplateLibrary config={ghConfig} onClose={() => setShowLibrary(false)} onLoad={handleLoadTemplate} />
+      )}
+
+      {/* GitHub 设置 */}
+      {showGhSettings && (
+        <GitHubSettingsModal
+          initial={ghConfig}
+          onSave={handleSaveGhConfig}
+          onClear={handleClearGhConfig}
+          onClose={() => setShowGhSettings(false)}
+        />
+      )}
     </div>
   );
 }

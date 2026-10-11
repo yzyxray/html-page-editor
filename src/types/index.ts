@@ -69,6 +69,23 @@ export interface ExportOptions {
 
 export type WorkflowStep = 1 | 2 | 3 | 4 | 5;
 
+/**
+ * GitHub 接入配置。由 GitHubSettingsModal 采集，存于 localStorage 键 `gh-config`。
+ * token 只保存在使用者本机，工具链任何环节都不会把它发送到除 api.github.com 之外的地方。
+ */
+export interface GitHubConfig {
+  /** Fine-grained PAT，权限只需 Contents: Read and write */
+  token: string;
+  /** 仓库拥有者，如 yzyxray */
+  owner: string;
+  /** 仓库名，如 landing-archive */
+  repo: string;
+  /** 分支，通常是 main */
+  branch: string;
+  /** 仓库内的路径前缀，留空表示直接写仓库根目录 */
+  basePath: string;
+}
+
 export interface WorkflowState {
   currentStep: WorkflowStep;
   rawHtml: string;

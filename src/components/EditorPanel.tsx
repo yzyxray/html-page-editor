@@ -5,11 +5,12 @@ import grapesjsPresetWebpage from 'grapesjs-preset-webpage';
 import {
   Monitor, Tablet, Smartphone, Code, Eye, RotateCcw, AlertTriangle,
   Type, Check, X, Link2, Image as ImageIcon, FormInput, Layers, ChevronDown,
-  MousePointer2, Settings, Download, UploadCloud, ExternalLink, CheckCircle2, XCircle,
+  MousePointer2, Settings, Download, UploadCloud, ExternalLink, CheckCircle2, XCircle, BookOpen,
 } from 'lucide-react';
 import { useWorkflowStore } from '../store/useWorkflowStore';
 import { scanLinks } from '../lib/link-scanner';
 import { makeZip } from '../lib/zip';
+import { SaveTemplateModal } from './SaveTemplateModal';
 import type { ReplaceRule } from '../types';
 
 type DeviceType = 'desktop' | 'tablet' | 'mobile';
@@ -829,6 +830,7 @@ export function EditorPanel() {
   const [cfConfig, setCfConfig] = useState<CfConfig>({ accountId: '', apiToken: '', projectName: '' });
   const [showCfSettings, setShowCfSettings] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string; link?: { text: string; url: string } } | null>(null);
 
   // 启动时从 localStorage 读取配置
@@ -1396,6 +1398,11 @@ export function EditorPanel() {
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-lg transition-colors">
             <RotateCcw size={14} />保存到工作流
           </button>
+          <button onClick={() => setShowSaveTemplate(true)}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            title="把当前页面存入 GitHub 模板库，随时可调出来复用">
+            <BookOpen size={14} />存为模板
+          </button>
           <div className="w-px h-5 bg-slate-200 mx-0.5" />
           <button onClick={handleSaveLocal}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
@@ -1444,6 +1451,20 @@ export function EditorPanel() {
           html={editorRef.current?.getHtml() || effectiveHtml}
           onClose={() => setShowBatchDrawer(false)}
           onApply={handleBatchApply}
+        />
+      )}
+
+      {/* 存为模板 */}
+      {showSaveTemplate && (
+        <SaveTemplateModal
+          html={getCurrentFullHtml()}
+          onClose={() => setShowSaveTemplate(false)}
+          onSaved={(meta) => {
+            showNotification({
+              type: 'success',
+              message: `模板「${meta.name}」已存入 GitHub：templates/${meta.slug}`,
+            }, 5000);
+          }}
         />
       )}
 
