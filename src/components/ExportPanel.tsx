@@ -11,7 +11,7 @@ import { readGhConfig, isGhConfigReady, saveArchive } from '../lib/github-store'
 import { classifySize, formatBytes, SIZE_TIER_MESSAGES } from '../lib/size-guard';
 
 export function ExportPanel() {
-  const { finalHtml, cleanedHtml, exportOptions, setExportOptions, detectedScripts, addedScripts } = useWorkflowStore();
+  const { finalHtml, cleanedHtml, editorHtml, exportOptions, setExportOptions, detectedScripts, addedScripts } = useWorkflowStore();
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const [processing, setProcessing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -98,7 +98,7 @@ export function ExportPanel() {
     }
   }, [exportResult, busyOutlet, exportOptions.fileName, notify]);
 
-  const effectiveHtml = finalHtml || cleanedHtml;
+  const effectiveHtml = editorHtml || finalHtml || cleanedHtml;
 
   const handleExport = useCallback(async () => {
     if (!effectiveHtml) return;

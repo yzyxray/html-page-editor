@@ -883,10 +883,12 @@ function CloudflareSettingsModal({
 
 // ── 主 EditorPanel ──
 export function EditorPanel() {
-  const { cleanedHtml, finalHtml, setFinalHtml } = useWorkflowStore();
+  const { cleanedHtml, finalHtml, setFinalHtml, editorHtml, setEditorHtml } = useWorkflowStore();
   const editorRef = useRef<Editor | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const htmlRef = useRef<string>('');
+  /** 标记「挂载后首次就绪」——交给 initEditor 的 load 事件加载，避免 re-init 覆盖已编辑内容 */
+  const didInitRef = useRef(false);
   const [editorReady, setEditorReady] = useState(false);
   const [currentDevice, setCurrentDevice] = useState<DeviceType>('desktop');
   const [codeView, setCodeView] = useState(false);
@@ -932,18 +934,28 @@ export function EditorPanel() {
     if (n) setTimeout(() => setNotification((cur) => (cur === n ? null : cur)), duration);
   };
 
-  const effectiveHtml = finalHtml || cleanedHtml;
+  // 导出/预览用的 HTML 优先级：实时编辑器内容 > 显式保存 > 清洗后的源
+  // 这样画布里直接改字、右侧面板改字都会立即反映到导出，不再丢失
+  const sourceHtml = editorHtml || finalHtml || cleanedHtml;
 
   // 保持 ref 同步，供 initEditor 闭包读取最新值
   useEffect(() => {
-    htmlRef.current = effectiveHtml;
-  }, [effectiveHtml]);
+    htmlRef.current = sourceHtml;
+  }, [sourceHtml]);
 
-  // 页面 CSS 随 HTML 一起更新，独立于画布保存
+  // 页面 CSS / head meta 只从「原始清洗后的源」(cleanedHtml) 提取，保持稳定。
+  // 注意：不能从 editorHtml / finalHtml 提取——它们是已经包好 <style> 的导出产物，
+  // 若再从里面抽一次 style 就会在每次保存时重复包裹，导致 CSS / meta 成倍膨胀。
   useEffect(() => {
-    pageCssRef.current = effectiveHtml ? extractStyleBlocks(effectiveHtml) : '';
-    headMetasRef.current = effectiveHtml ? extractHeadMetas(effectiveHtml) : '';
-  }, [effectiveHtml]);
+    pageCssRef.current = cleanedHtml ? extractStyleBlocks(cleanedHtml) : '';
+    headMetasRef.current = cleanedHtml ? extractHeadMetas(cleanedHtml) : '';
+  }, [cleanedHtml]);
+
+  // 导入了新页面：清空上一轮的实时/显式保存内容，避免载入错误的旧页面
+  useEffect(() => {
+    setEditorHtml(null);
+    setFinalHtml('');
+  }, [cleanedHtml]);
 
   const extractSelectionInfo = useCallback((editor: Editor): SelectedInfo | null => {
     const selected = editor.getSelected();
@@ -1108,6 +1120,25 @@ export function EditorPanel() {
       refreshCachedClasses(editor);
     });
 
+    // 画布里任何内容/样式改动都实时同步到 store，
+    // 否则「下一步」导出时只会拿到旧内容（这是之前「画布改字丢失」的根因）
+    const debouncedSync = (() => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      return () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          if (!editorRef.current) return;
+          const wrapped = wrapWithStyle(
+            editorRef.current.getHtml(),
+            composeExportCss(),
+            headMetasRef.current
+          );
+          setEditorHtml(wrapped);
+        }, 500);
+      };
+    })();
+    editor.on('update', debouncedSync);
+
     editorRef.current = editor;
   }, [extractSelectionInfo, refreshCachedClasses]);
 
@@ -1123,15 +1154,20 @@ export function EditorPanel() {
   }, [initEditor]);
 
   useEffect(() => {
-    if (editorRef.current && editorReady && effectiveHtml) {
-      const wrapper = editorRef.current.DomComponents.getWrapper();
-      if (wrapper) {
-        wrapper.set('content', '');
-        editorRef.current.setComponents(effectiveHtml);
-        refreshCachedClasses(editorRef.current);
-      }
+    if (!editorRef.current || !editorReady || !cleanedHtml) return;
+    // 挂载后首次就绪交给 initEditor 的 load 事件（会用 sourceHtml 还原已编辑内容），
+    // 这里只在「导入了新页面」(cleanedHtml 变化) 时重新加载，避免覆盖画布里的改动
+    if (!didInitRef.current) {
+      didInitRef.current = true;
+      return;
     }
-  }, [effectiveHtml, editorReady, refreshCachedClasses]);
+    const wrapper = editorRef.current.DomComponents.getWrapper();
+    if (wrapper) {
+      wrapper.set('content', '');
+      editorRef.current.setComponents(cleanedHtml);
+      refreshCachedClasses(editorRef.current);
+    }
+  }, [cleanedHtml, editorReady, refreshCachedClasses]);
 
   // ── Handlers ──
   const handleDeviceChange = (device: DeviceType) => {
@@ -1162,34 +1198,43 @@ export function EditorPanel() {
     return [pageCssRef.current, grapesCss].filter(Boolean).join('\n\n');
   }, []);
 
-  const handleSaveToState = () => {
+  /** 把画布当前内容实时同步到 store（editorHtml + finalHtml），导出/预览才能拿到最新改动 */
+  const syncEditorToStore = useCallback(() => {
     if (!editorRef.current) return;
-    const html = editorRef.current.getHtml();
-    setFinalHtml(wrapWithStyle(html, composeExportCss(), headMetasRef.current));
+    const wrapped = wrapWithStyle(
+      editorRef.current.getHtml(),
+      composeExportCss(),
+      headMetasRef.current
+    );
+    setEditorHtml(wrapped);
+    setFinalHtml(wrapped);
+  }, [setEditorHtml, setFinalHtml]);
+
+  const handleSaveToState = () => {
+    syncEditorToStore();
   };
 
   // 应用文字修改。
   //
   // 只允许在「整个元素就是一段文字」时改写，这是刻意的安全约束：
-  //   · 1 段文字 → 直接改它的 content，等价于 GrapesJS 自己的行内编辑，无损；
-  //   · 多段文字（元素里还嵌了 <b>/<span> 等）→ 侧栏文本框显示的是整段 textContent，
+  //   · 0 段 → 元素里本来没文字（空容器/只有图），补一段进去；
+  //   · 1 段 → 直接改它的 content，等价于 GrapesJS 自己的行内编辑，无损；
+  //   · 多段（元素里还嵌了 <b>/<span> 等）→ 侧栏文本框显示的是整段 textContent，
   //     一次性写入必然造成「改完文字消失」或「内容存不进去」这两种错乱，
   //     所以这里明确拒绝并引导去画布双击对应那段文字。
   const handleApplyText = (newText: string) => {
     if (!editorRef.current || !selectedInfo) return;
-    const selected = editorRef.current.getSelected();
+    const editor = editorRef.current;
+    const selected = editor.getSelected();
     if (!selected) return;
+    const cid = selected.get('id');
 
     const parts = collectTextComponents(selected);
 
     if (parts.length === 0) {
       // 元素内没有任何文字（空容器、或只含图片），补一段进去
       selected.append(newText);
-      setSelectedInfo(extractSelectionInfo(editorRef.current));
-      return;
-    }
-
-    if (parts.length > 1) {
+    } else if (parts.length > 1) {
       showNotification(
         {
           type: 'error',
@@ -1200,10 +1245,19 @@ export function EditorPanel() {
         7000
       );
       return;
+    } else {
+      parts[0].set('content', newText);
     }
 
-    parts[0].set('content', newText);
-    setSelectedInfo(extractSelectionInfo(editorRef.current));
+    // set 之后重新选中该组件：避免 RTE 视图脱钩把元素从画布“弄丢”，
+    // 也保证下面刷新侧栏时 getSelected() 拿到的是有效节点
+    // （否则 component 重渲染瞬间 getEl() 为空，侧栏会被误判为“未选中”而清空）
+    if (cid) {
+      try { editor.select(cid); } catch { /* 选中失败不影响已写入的内容 */ }
+    }
+    syncEditorToStore();
+    const info = extractSelectionInfo(editor);
+    if (info) setSelectedInfo(info);
   };
 
   // 链接/图片/表单属性编辑
@@ -1420,7 +1474,7 @@ export function EditorPanel() {
   };
 
   // ── Empty state ──
-  if (!effectiveHtml) {
+  if (!sourceHtml) {
     return (
       <div className="max-w-6xl mx-auto pt-10 pb-6 px-6">
         <div className="mb-6">
@@ -1544,7 +1598,7 @@ export function EditorPanel() {
       {/* 批量链接抽屉 */}
       {showBatchDrawer && (
         <BatchLinkDrawer
-          html={editorRef.current?.getHtml() || effectiveHtml}
+          html={editorRef.current?.getHtml() || sourceHtml}
           onClose={() => setShowBatchDrawer(false)}
           onApply={handleBatchApply}
         />

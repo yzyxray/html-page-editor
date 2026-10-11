@@ -97,6 +97,8 @@ export interface WorkflowState {
   rawHtml: string;
   cleanedHtml: string;
   finalHtml: string;
+  /** 编辑器实时 HTML（每次内容变更自动同步），导出/预览优先用这份，避免改动丢失 */
+  editorHtml: string | null;
   detectedScripts: DetectedScript[];
   addedScripts: AddedScript[];
   links: LinkInfo[];
@@ -113,6 +115,7 @@ export interface WorkflowState {
   setRawHtml: (html: string) => void;
   setCleanedHtml: (html: string) => void;
   setFinalHtml: (html: string) => void;
+  setEditorHtml: (html: string | null) => void;
   setDetectedScripts: (scripts: DetectedScript[]) => void;
   updateScriptAction: (id: string, action: DetectedScript['action'], replacementId?: string) => void;
   addScript: (script: AddedScript) => void;

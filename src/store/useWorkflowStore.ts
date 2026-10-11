@@ -22,6 +22,7 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
   rawHtml: '',
   cleanedHtml: '',
   finalHtml: '',
+  editorHtml: null,
   detectedScripts: [],
   addedScripts: [],
   links: [],
@@ -42,6 +43,8 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
   setCleanedHtml: (html) => set({ cleanedHtml: html }),
 
   setFinalHtml: (html) => set({ finalHtml: html }),
+
+  setEditorHtml: (html) => set({ editorHtml: html }),
 
   setDetectedScripts: (scripts) => set({ detectedScripts: scripts }),
 
@@ -94,6 +97,7 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
       rawHtml: '',
       cleanedHtml: '',
       finalHtml: '',
+      editorHtml: null,
       detectedScripts: [],
       addedScripts: [],
       links: [],

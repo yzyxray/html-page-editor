@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback } from 'react';
-import { Upload, Code, FileText, AlertTriangle } from 'lucide-react';
+import { Upload, Code, FileText, AlertTriangle, Image as ImageIcon } from 'lucide-react';
 import { useWorkflowStore } from '../store/useWorkflowStore';
 import { classifySize, formatBytes, SIZE_TIER_MESSAGES, type SizeTier } from '../lib/size-guard';
+import { inlineImagesInHtml, type ImageInlineResult } from '../lib/image-inliner';
 
 export function ImportPanel() {
   const { rawHtml, setRawHtml, setStats } = useWorkflowStore();
@@ -19,6 +20,10 @@ export function ImportPanel() {
     extCss: number;
   }>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** 图片内联兜底：相对路径需基准地址，外链需服务器允许跨域 */
+  const [baseUrl, setBaseUrl] = useState('');
+  const [inlining, setInlining] = useState(false);
+  const [inlineResult, setInlineResult] = useState<ImageInlineResult | null>(null);
 
   /**
    * 检测页面里的资源引用方式。这直接决定「图片为什么不见了」：
@@ -70,8 +75,9 @@ export function ImportPanel() {
 
     setResourceWarn(detectResourceIssues(doc));
     setRawHtml(html);
+    setInlineResult(null);
     setImported(true);
-  }, [setRawHtml, setStats]);
+  }, [setRawHtml, setStats, setInlineResult]);
 
   const analyzeHtml = useCallback((html: string) => {
     const bytes = new Blob([html]).size;
@@ -101,6 +107,35 @@ export function ImportPanel() {
     setPendingLarge(null);
     setHtmlInput('');
   }, []);
+
+  /** 把外链/相对路径图片尽量内联成 data URL（最佳努力，失败的保留原链接） */
+  const handleInlineImages = useCallback(async () => {
+    if (!rawHtml) return;
+    setInlining(true);
+    try {
+      const result = await inlineImagesInHtml(rawHtml, baseUrl.trim() || undefined);
+      // 重新写回 store，并刷新统计与资源告警，让红/黄提示随内联结果更新
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(result.html, 'text/html');
+      const scripts = doc.querySelectorAll('script').length;
+      const links = doc.querySelectorAll('a[href], img[src], form[action], iframe[src]').length;
+      const images = doc.querySelectorAll('img').length;
+      setStats({
+        htmlSize: new Blob([result.html]).size,
+        scriptCount: scripts,
+        linkCount: links,
+        imageCount: images,
+      });
+      setResourceWarn(detectResourceIssues(doc));
+      setRawHtml(result.html);
+      setInlineResult(result);
+    } catch {
+      // 极端情况下也不破坏已导入内容
+      setInlineResult({ html: rawHtml, total: 0, inlined: 0, skipped: 0, failed: [] });
+    } finally {
+      setInlining(false);
+    }
+  }, [rawHtml, baseUrl, setRawHtml, setStats, setResourceWarn]);
 
   const handlePaste = () => {
     if (!htmlInput.trim()) {
@@ -286,6 +321,42 @@ export function ImportPanel() {
               <p className="text-xs text-purple-500 mt-1">图片</p>
             </div>
           </div>
+
+          {/* 图片内联兜底：把外链 / 相对路径图片尽量转成内联 data URL */}
+          <div className="mt-4 p-4 rounded-xl border border-slate-200 bg-slate-50">
+            <div className="flex items-center gap-2 mb-2">
+              <ImageIcon size={16} className="text-[#6366f1]" />
+              <h4 className="text-sm font-medium text-slate-700">图片内联（让图片真正显示）</h4>
+            </div>
+            <p className="text-xs text-slate-500 leading-relaxed mb-3">
+              把外链 / 相对路径图片尽量转成内联 data URL。相对路径需填写下方「页面来源 URL」作基准；
+              外链图片仅当对方服务器允许跨域时才能内联，否则会跳过并保留原链接（可在 Chrome 扩展上线后完整抓取）。
+            </p>
+            <input
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder="页面来源 URL（解析相对路径用，如 https://x.com/p/123）"
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6366f1] mb-3"
+              spellCheck={false}
+            />
+            <button
+              onClick={handleInlineImages}
+              disabled={inlining}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#6366f1] hover:bg-[#4f46e5] disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
+            >
+              {inlining ? '内联中…' : '开始内联图片'}
+            </button>
+            {inlineResult && (
+              <p className={`text-xs mt-3 leading-relaxed ${inlineResult.inlined > 0 ? 'text-green-700' : 'text-slate-500'}`}>
+                成功内联 {inlineResult.inlined} / {inlineResult.total} 张
+                （原本就是内联的 {inlineResult.skipped} 张无需处理
+                {inlineResult.failed.length > 0
+                  ? `；失败 ${inlineResult.failed.length} 张，多为跨域限制，扩展抓取上线后可完整内联`
+                  : ''}）。
+              </p>
+            )}
+          </div>
+
           {sizeTier !== 'normal' && SIZE_TIER_MESSAGES[sizeTier].body && (
             <div
               className={`mt-4 p-3 rounded-lg flex items-start gap-2 ${
