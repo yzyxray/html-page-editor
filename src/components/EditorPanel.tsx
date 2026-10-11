@@ -104,6 +104,25 @@ function findComponentByEl(editor: Editor, el: HTMLElement): GjsComponent | null
   return null;
 }
 
+// ── 查找元素内的文本子组件 ──
+// GrapesJS 会把元素里的文字解析成一个 type='text' 的**子组件**（不是字符串 content）。
+// 修改文字必须走这个子组件的模型；如果绕过模型直接改 DOM，再 trigger 'change:content'，
+// GrapesJS 会用模型里（此时为空的）content 重新渲染元素，把刚改的内容覆盖掉——表现为「文字消失」。
+function findTextComponent(c: GjsComponent): GjsComponent | null {
+  if (c.getType() === 'text') return c;
+  // 兼容少数被存成字符串 content 的纯文本组件
+  const own = c.get('content');
+  if (typeof own === 'string' && own.length > 0 && c.components().length === 0) return c;
+  const kids = c.components();
+  for (let i = 0; i < kids.length; i++) {
+    const kid = kids.models[i];
+    if (!kid) continue;
+    const found = findTextComponent(kid);
+    if (found) return found;
+  }
+  return null;
+}
+
 // ── 本地文件 → dataURL（base64 内嵌，HTML 自包含）──
 function readFileAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -1074,38 +1093,26 @@ export function EditorPanel() {
   };
 
   // 修复：文字应用后立即刷新画布
+  // 应用文字修改：只改GrapesJS 模型，绝不直接改 DOM。
+  // 直接改 DOM 后再 trigger 'change:content' 会让视图用模型里空的content 覆盖，导致文字消失。
   const handleApplyText = (newText: string) => {
     if (!editorRef.current || !selectedInfo) return;
     const selected = editorRef.current.getSelected();
     if (!selected) return;
 
-    const currentContent = selected.get('content') || '';
-    if (currentContent || selected.components().length === 0) {
-      // 组件有显式 content 或无子组件 —— 直接 set
+    const textComponent = findTextComponent(selected);
+    if (textComponent) {
+      // 常规路径：元素内的文字是一个 text 子组件，改它的 content
+      textComponent.set('content', newText);
+    } else if (selected.components().length === 0) {
+      // 元素本身就是一个纯文本组件
       selected.set('content', newText);
     } else {
-      // 组件有子组件 —— 找到文本节点更新
-      const el = selected.getEl();
-      if (el) {
-        // 保留子元素，只更新直接文本节点
-        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
-          acceptNode: (node) => node.textContent && node.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP,
-        });
-        const firstTextNode = walker.nextNode();
-        if (firstTextNode) {
-          firstTextNode.textContent = newText;
-        } else {
-          // 没有文本节点，前置一个
-          el.insertBefore(document.createTextNode(newText), el.firstChild);
-        }
-      }
+      // 有子组件但一个文本节点都没有（如空容器、只含 <img> 的元素）：补一个文本子组件
+      selected.append(newText);
     }
 
-    // 强制触发视图更新
-    selected.trigger('change:content');
-    editorRef.current.Canvas.getFrameEl();
-
-    // 重新读取选中信息，确保面板与画布一致
+    // 重新读取选中信息，确保侧栏显示与画布一致
     setSelectedInfo(extractSelectionInfo(editorRef.current));
   };
 

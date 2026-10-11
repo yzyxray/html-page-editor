@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Download, Copy, Check, FileText, Globe, AlertTriangle, Settings, Code, RefreshCw,
-  Archive, UploadCloud, FileDown, LoaderCircle,
+  Archive, UploadCloud, FileDown, LoaderCircle, Eye, Monitor, Smartphone,
 } from 'lucide-react';
 import { useWorkflowStore } from '../store/useWorkflowStore';
 import { exportHtml, downloadHtml, downloadZip } from '../lib/exporter';
@@ -22,6 +22,10 @@ export function ExportPanel() {
   const [busyOutlet, setBusyOutlet] = useState<'' | 'archive' | 'deploy' | 'zip'>('');
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [archiveName, setArchiveName] = useState('');
+
+  // ── 预览模式：可视化渲染（默认）/ HTML 源码 ──
+  const [previewMode, setPreviewMode] = useState<'visual' | 'source'>('visual');
+  const [previewWidth, setPreviewWidth] = useState<'desktop' | 'mobile'>('desktop');
 
   const ghConfig = readGhConfig();
   const ghReady = isGhConfigReady(ghConfig);
@@ -415,27 +419,99 @@ export function ExportPanel() {
 
         {/* Preview */}
         <div className="lg:col-span-2">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-full">
-            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-600">HTML 预览</span>
-              {exportResult && (
-                <span className="text-xs text-slate-400 font-mono">
-                  {exportResult.html.length.toLocaleString()} 字符
-                </span>
-              )}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-full flex flex-col">
+            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-3 flex-wrap">
+              <span className="text-sm font-medium text-slate-600">
+                {previewMode === 'visual' ? '成品预览' : 'HTML 源码'}
+              </span>
+
+              <div className="flex items-center gap-2">
+                {/* 视口切换 */}
+                {previewMode === 'visual' && (
+                  <div className="flex items-center gap-1 bg-slate-200/60 rounded-lg p-0.5">
+                    <button
+                      onClick={() => setPreviewWidth('desktop')}
+                      className={`p-1.5 rounded-md transition-colors ${
+                        previewWidth === 'desktop'
+                          ? 'bg-white text-[#6366f1] shadow-sm'
+                          : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                      title="桌面视口"
+                    >
+                      <Monitor size={14} />
+                    </button>
+                    <button
+                      onClick={() => setPreviewWidth('mobile')}
+                      className={`p-1.5 rounded-md transition-colors ${
+                        previewWidth === 'mobile'
+                          ? 'bg-white text-[#6366f1] shadow-sm'
+                          : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                      title="手机视口（投放流量以移动端为主时用这个）"
+                    >
+                      <Smartphone size={14} />
+                    </button>
+                  </div>
+                )}
+
+                {/* 可视化 / 源码 切换 */}
+                <button
+                  onClick={() => setPreviewMode((m) => (m === 'visual' ? 'source' : 'visual'))}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                  title={previewMode === 'visual' ? '查看 HTML 源码' : '回到可视化预览'}
+                >
+                  {previewMode === 'visual' ? <Code size={14} /> : <Eye size={14} />}
+                  {previewMode === 'visual' ? '源码' : '可视化'}
+                </button>
+
+                {exportResult && (
+                  <span className="text-xs text-slate-400 font-mono">
+                    {exportResult.html.length.toLocaleString()} 字符
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="p-4 max-h-[600px] overflow-auto">
-              {exportResult ? (
-                <pre className="text-xs font-mono text-slate-600 whitespace-pre-wrap leading-relaxed">
-                  <code>{exportResult.html.substring(0, 15000)}{exportResult.html.length > 15000 ? '\n\n... (内容已截断，请下载查看完整文件)' : ''}</code>
-                </pre>
-              ) : processing ? (
-                <div className="flex items-center justify-center py-12">
-                  <div className="animate-spin w-6 h-6 border-2 border-[#6366f1] border-t-transparent rounded-full" />
-                  <span className="ml-3 text-sm text-slate-500">处理中...</span>
-                </div>
+
+            <div className="p-4 flex-1 min-h-0">
+              {!exportResult ? (
+                processing ? (
+                  <div className="flex items-center justify-center h-[600px]">
+                    <div className="animate-spin w-6 h-6 border-2 border-[#6366f1] border-t-transparent rounded-full" />
+                    <span className="ml-3 text-sm text-slate-500">处理中...</span>
+                  </div>
+                ) : (
+                  <p className="text-slate-400 text-sm text-center py-12">等待导出...</p>
+                )
+              ) : previewMode === 'visual' ? (
+                <>
+                  <div className="flex justify-center">
+                    <iframe
+                      title="成品页面预览"
+                      srcDoc={exportResult.html}
+                      /*不给 allow-same-origin：预览内容被隔离在独立来源里，
+                        无法读写本应用的 localStorage / cookie，避免竞品页里的脚本
+                        读到我们的 GitHub token。allow-popups-to-escape-sandbox 让 CTA
+                        按钮能正常在新标签打开，便于验证落地页链接。*/
+                      sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+                      className="w-full border border-slate-200 rounded-lg bg-white"
+                      style={{
+                        height: '600px',
+                        maxWidth: previewWidth === 'mobile' ? '390px' : '100%',
+                      }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-2.5 leading-relaxed">
+                    这是导出后文件的真实渲染效果。若图片裂开或样式缺失，说明该页面的资源用的是相对路径、
+                    浏览器内无法解析——由扩展抓取时会自动转成 base64 内联，不会有这个问题。
+                  </p>
+                </>
               ) : (
-                <p className="text-slate-400 text-sm text-center py-12">等待导出...</p>
+                <pre className="text-xs font-mono text-slate-600 whitespace-pre-wrap leading-relaxed max-h-[600px] overflow-auto">
+                  <code>
+                    {exportResult.html.substring(0, 15000)}
+                    {exportResult.html.length > 15000 ? '\n\n... (内容已截断，请下载查看完整文件)' : ''}
+                  </code>
+                </pre>
               )}
             </div>
           </div>
