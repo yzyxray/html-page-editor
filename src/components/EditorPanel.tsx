@@ -109,24 +109,64 @@ function findComponentByEl(editor: Editor, el: HTMLElement): GjsComponent | null
 // ── 查找元素内的全部文本子组件 ──
 // GrapesJS 会把元素里的文字存成 type='text' 的**子组件**，元素自身的 content 恒为 ''。
 // 收集全部文本片段是为了判断「能不能安全地整体改写」：
-// 只有 1 段时改它是无损的；多段（元素里还嵌了 <b>/<span> 等）时整体改写会破坏结构，
-// 必须引导用户去画布里双击那一段直接编辑。
+// 收集元素里「每一段文字」。
+//
+// 关键背景（已用真实 GrapesJS 结构验证）：从 HTML 导入的元素，
+// `<h1>标题</h1>` 会被解析成 `h1(data-gjs-type="text").components = [textnode("标题")]`，
+// 也就是「文本在唯一子 textnode 上，父元素 content 为空」。
+// 因此：
+//   · 只有一个 textnode 子节点（或没有子节点但 content 有值）→ 整块就是「一段文字」，
+//     返回父元素本身，交给调用方用 components() 整体替换；
+//   · 子节点里有两个以上（如 text + <b> + text）→ 视为多段，逐个收集，调用方会拒绝改写。
 function collectTextComponents(c: GjsComponent, out: GjsComponent[] = []): GjsComponent[] {
-  if (c.getType() === 'text') {
-    out.push(c);
-    return out;
-  }
+  const type = c.getType();
   const kids = c.components();
-  const own = c.get('content');
-  if (typeof own === 'string' && own.length > 0 && kids.length === 0) {
+
+  if (type === 'textnode') {
     out.push(c);
     return out;
   }
+
+  const own = c.get('content');
+  const hasOwnText = typeof own === 'string' && own.length > 0;
+
+  if (kids.length === 0) {
+    if (hasOwnText || type === 'text') out.push(c);
+    return out;
+  }
+
+  if (kids.length === 1 && kids.models[0] && kids.models[0].getType() === 'textnode') {
+    out.push(c);
+    return out;
+  }
+
   for (let i = 0; i < kids.length; i++) {
     const kid = kids.models[i];
     if (kid) collectTextComponents(kid, out);
   }
   return out;
+}
+
+/**
+ * 安全地把某个元素的文字替换成 newText。
+ *
+ * 不能用 `comp.set('content', text)`：对「content 为空、文本在子 textnode 上」的
+ * 元素（导入 HTML 的常见形态），这会把子节点清掉，元素变成空壳——这正是
+ * 「点应用修改后文字框全消失」的根因。正确做法是用 `components()` 重建子节点。
+ */
+function setElementText(comp: GjsComponent, newText: string): void {
+  let target = comp;
+  if (target.getType() === 'textnode') {
+    const parent = target.parent();
+    if (parent) target = parent;
+  }
+  try {
+    // 用 textnode 组件定义而不是裸字符串：这样用户输入的 < > & 会被当字面文字，
+    // 既不会丢内容，也不会被误解析成 HTML 元素（「文字内容」字段应输入纯文本）
+    target.components([{ type: 'textnode', content: newText }]);
+  } catch {
+    target.set('content', newText);
+  }
 }
 
 /**
@@ -1146,6 +1186,19 @@ export function EditorPanel() {
     initEditor();
     return () => {
       if (editorRef.current) {
+        // 离开编辑步骤（例如点「下一步」去导出）前，把画布最新内容同步到 store。
+        // 这是最后一道保险：不依赖 debounce / RTE 提交时机，确保「下一步」拿到的永远是最新改动。
+        try {
+          const wrapped = wrapWithStyle(
+            editorRef.current.getHtml(),
+            composeExportCss(),
+            headMetasRef.current
+          );
+          setEditorHtml(wrapped);
+          setFinalHtml(wrapped);
+        } catch {
+          /* 同步失败不影响销毁 */
+        }
         editorRef.current.destroy();
         editorRef.current = null;
         setEditorReady(false);
@@ -1246,7 +1299,7 @@ export function EditorPanel() {
       );
       return;
     } else {
-      parts[0].set('content', newText);
+      setElementText(parts[0], newText);
     }
 
     // set 之后重新选中该组件：避免 RTE 视图脱钩把元素从画布“弄丢”，
