@@ -25,3 +25,6 @@ dist-ssr
 
 # Local version backups (kept on disk, not in repo)
 .backup/
+
+# Playwright CLI 调试产物（快照/截图），不入库
+.playwright-cli/
