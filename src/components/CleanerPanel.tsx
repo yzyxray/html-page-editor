@@ -1,10 +1,17 @@
 import { useState, useMemo } from 'react';
-import { Shield, Image, MessageSquare, Layers, Check, AlertTriangle, Eye, EyeOff } from 'lucide-react';
+import { Shield, ShieldAlert, Image, MessageSquare, Layers, Check, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 import { useWorkflowStore } from '../store/useWorkflowStore';
 import { cleanHtml, type CleanResult } from '../lib/html-cleaner';
 import type { CleanOptions } from '../types';
 
 const CLEAN_OPTIONS = [
+  {
+    key: 'removeCspMeta' as const,
+    label: 'CSP 策略标签',
+    description: '剥离竞品的 Content-Security-Policy——投放自有域名后它会拦截你的追踪脚本',
+    icon: ShieldAlert,
+    color: 'text-red-500',
+  },
   {
     key: 'removeJSONLD' as const,
     label: 'JSON-LD 结构化数据',
@@ -192,14 +199,26 @@ function highlightCode(html: string): string {
     .replace(/>/g, '&gt;');
 }
 
+/**
+ * 高亮预览最多处理的字符数（200KB）。
+ *
+ * highlightRemovedItems 会对整段 HTML 做 split('\n').map().join('\n')，
+ * 在 base64 内联后动辄十几 MB 的落地页上会产生数十万元素的数组，足以卡死标签页。
+ * 预览本身只是辅助功能，截断不影响清洗结果本身，只影响展示。
+ */
+const HIGHLIGHT_LIMIT = 200 * 1024;
+
 function highlightRemovedItems(html: string, options: CleanOptions): string {
-  const escaped = html
+  const truncated = html.length > HIGHLIGHT_LIMIT;
+  const source = truncated ? html.slice(0, HIGHLIGHT_LIMIT) : html;
+
+  const escaped = source
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
   // Simple line-based highlighting for removed items
-  return escaped
+  const body = escaped
     .split('\n')
     .map((line) => {
       if (options.removeComments && line.includes('&lt;!--')) {
@@ -208,4 +227,7 @@ function highlightRemovedItems(html: string, options: CleanOptions): string {
       return `<span class="text-slate-500">${line}</span>`;
     })
     .join('\n');
+
+  if (!truncated) return body;
+  return `${body}\n\n<span class="text-amber-500">… 内容过长，仅高亮前 ${Math.round(HIGHLIGHT_LIMIT / 1024)}KB。清洗结果本身完整，完整内容请在导出步骤下载 HTML 查看。</span>`;
 }

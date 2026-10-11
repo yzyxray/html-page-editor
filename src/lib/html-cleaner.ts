@@ -33,6 +33,35 @@ export function cleanHtml(html: string, options: CleanOptions): CleanResult {
   const doc = parser.parseFromString(html, 'text/html');
   const removedItems: CleanResult['removedItems'] = [];
 
+  // 0. Remove CSP meta tags
+  //    竞品页常带 <meta http-equiv="Content-Security-Policy">，其 script-src 通常只放行竞品自己的域名。
+  //    把这个页面投放到自有域名后，我们注入的 GA4 / Meta Pixel / TikTok 等内联脚本会被 CSP 拦掉，
+  //    页面看起来正常但追踪全部失效——这是个非常隐蔽的坑，因此默认剥离并单独计数。
+  if (options.removeCspMeta) {
+    const metas = Array.from(doc.querySelectorAll('meta[http-equiv]'));
+    const samples: string[] = [];
+    let cspCount = 0;
+
+    metas.forEach((meta) => {
+      const equiv = (meta.getAttribute('http-equiv') || '').trim().toLowerCase();
+      if (
+        equiv === 'content-security-policy' ||
+        equiv === 'content-security-policy-report-only'
+      ) {
+        const content = (meta.getAttribute('content') || '').trim();
+        if (samples.length < 3) {
+          samples.push(content.substring(0, 100) || '(该标签无 content 属性)');
+        }
+        meta.remove();
+        cspCount++;
+      }
+    });
+
+    if (cspCount > 0) {
+      removedItems.push({ type: 'CSP 策略标签', count: cspCount, samples });
+    }
+  }
+
   // 1. Remove JSON-LD
   if (options.removeJSONLD) {
     const jsonLdScripts = doc.querySelectorAll('script[type="application/ld+json"]');

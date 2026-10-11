@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { WorkflowState, WorkflowStep, DetectedScript, AddedScript, LinkInfo, ReplaceRule, CleanOptions, ExportOptions } from '../types';
 
 const defaultCleanOptions: CleanOptions = {
+  // 默认剥离 CSP：竞品页的严格策略会拦截投放到自有域名后的内联追踪脚本
+  removeCspMeta: true,
   removeJSONLD: true,
   removeTrackingPixels: true,
   removeComments: false,

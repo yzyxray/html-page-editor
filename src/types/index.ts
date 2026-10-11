@@ -48,6 +48,12 @@ export interface LinkInfo {
 }
 
 export interface CleanOptions {
+  /**
+   * 剥离 <meta http-equiv="Content-Security-Policy">（含 Report-Only 变体）。
+   * 竞品页面常带严格的 CSP，会拦截我们注入到自有域名上的内联追踪脚本，
+   * 导致页面投放到自己的域名后功能失效，因此默认开启。
+   */
+  removeCspMeta: boolean;
   removeJSONLD: boolean;
   removeTrackingPixels: boolean;
   removeComments: boolean;

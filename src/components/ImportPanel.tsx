@@ -1,15 +1,20 @@
 import { useState, useRef, useCallback } from 'react';
-import { Upload, Code, FileText } from 'lucide-react';
+import { Upload, Code, FileText, AlertTriangle } from 'lucide-react';
 import { useWorkflowStore } from '../store/useWorkflowStore';
+import { classifySize, formatBytes, SIZE_TIER_MESSAGES, type SizeTier } from '../lib/size-guard';
 
 export function ImportPanel() {
   const { rawHtml, setRawHtml, setStats } = useWorkflowStore();
   const [htmlInput, setHtmlInput] = useState('');
   const [error, setError] = useState('');
   const [imported, setImported] = useState(false);
+  const [sizeTier, setSizeTier] = useState<SizeTier>('normal');
+  /** 体积超阈值时暂存 HTML，等用户点「仍然继续」再真正导入 */
+  const [pendingLarge, setPendingLarge] = useState<{ html: string; tier: SizeTier } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const analyzeHtml = useCallback((html: string) => {
+  /** 真正执行导入：统计 + 写入 store */
+  const doImport = useCallback((html: string) => {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
     const scripts = doc.querySelectorAll('script');
@@ -26,6 +31,35 @@ export function ImportPanel() {
     setRawHtml(html);
     setImported(true);
   }, [setRawHtml, setStats]);
+
+  const analyzeHtml = useCallback((html: string) => {
+    const bytes = new Blob([html]).size;
+    const tier = classifySize(bytes);
+    setSizeTier(tier);
+
+    // 超大页面不直接导入：先给出分级提示与显式继续入口，避免一步按下去就把标签页卡死
+    if (tier === 'oversize' || tier === 'blocked') {
+      setPendingLarge({ html, tier });
+      setError('');
+      return;
+    }
+
+    setPendingLarge(null);
+    setError('');
+    doImport(html);
+  }, [doImport]);
+
+  const handleForceProceed = useCallback(() => {
+    if (!pendingLarge) return;
+    const { html } = pendingLarge;
+    setPendingLarge(null);
+    doImport(html);
+  }, [pendingLarge, doImport]);
+
+  const handleDiscardLarge = useCallback(() => {
+    setPendingLarge(null);
+    setHtmlInput('');
+  }, []);
 
   const handlePaste = () => {
     if (!htmlInput.trim()) {
@@ -134,6 +168,51 @@ export function ImportPanel() {
         </div>
       </div>
 
+      {/* 大页面二次确认 —— 超过 15MB 时不直接导入，先让用户知情 */}
+      {pendingLarge && (
+        <div
+          className={`mt-4 p-4 rounded-xl border shadow-sm ${
+            pendingLarge.tier === 'blocked'
+              ? 'bg-red-50 border-red-200'
+              : 'bg-amber-50 border-amber-200'
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <AlertTriangle
+              size={20}
+              className={`shrink-0 mt-0.5 ${
+                pendingLarge.tier === 'blocked' ? 'text-red-500' : 'text-amber-500'
+              }`}
+            />
+            <div className="flex-1 min-w-0">
+              <p className={`text-sm font-semibold ${pendingLarge.tier === 'blocked' ? 'text-red-700' : 'text-amber-700'}`}>
+                {SIZE_TIER_MESSAGES[pendingLarge.tier].title}
+                （{formatBytes(new Blob([pendingLarge.html]).size)}）
+              </p>
+              <p className={`text-xs mt-1.5 leading-relaxed ${pendingLarge.tier === 'blocked' ? 'text-red-600' : 'text-amber-700'}`}>
+                {SIZE_TIER_MESSAGES[pendingLarge.tier].body}
+              </p>
+              <div className="flex gap-2 mt-3">
+                {pendingLarge.tier !== 'blocked' && (
+                  <button
+                    onClick={handleForceProceed}
+                    className="px-4 py-2 text-xs font-medium bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors"
+                  >
+                    仍然继续编辑
+                  </button>
+                )}
+                <button
+                  onClick={handleDiscardLarge}
+                  className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-white border border-slate-200 bg-white/70 rounded-lg transition-colors"
+                >
+                  放弃本次导入
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Error */}
       {error && (
         <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600 flex items-center gap-2">
@@ -150,7 +229,7 @@ export function ImportPanel() {
           </h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="bg-slate-50 rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-slate-700">{formatSize(stats.htmlSize)}</p>
+              <p className="text-2xl font-bold text-slate-700">{formatBytes(stats.htmlSize)}</p>
               <p className="text-xs text-slate-500 mt-1">文件大小</p>
             </div>
             <div className="bg-amber-50 rounded-lg p-3 text-center">
@@ -166,14 +245,18 @@ export function ImportPanel() {
               <p className="text-xs text-purple-500 mt-1">图片</p>
             </div>
           </div>
+          {sizeTier !== 'normal' && SIZE_TIER_MESSAGES[sizeTier].body && (
+            <div
+              className={`mt-4 p-3 rounded-lg flex items-start gap-2 ${
+                sizeTier === 'large' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'
+              }`}
+            >
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              <p className="text-xs leading-relaxed">{SIZE_TIER_MESSAGES[sizeTier].body}</p>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

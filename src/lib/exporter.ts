@@ -1,10 +1,16 @@
 import type { DetectedScript, AddedScript, ExportOptions } from '../types';
 import { TRACKING_TEMPLATES } from './tracking-templates';
+import { decideExportStrategy } from './size-guard';
+import { buildZipBlob } from './zip';
 
 export interface ExportResult {
   html: string;
   size: number;
   warnings: string[];
+  /** true 表示因体积超阈值而降级执行（跳过了部分昂贵步骤） */
+  degraded: boolean;
+  /** 被跳过的步骤名称，供 UI 如实告知用户 */
+  skippedSteps: string[];
 }
 
 /**
@@ -34,7 +40,9 @@ async function inlineStyles(html: string): Promise<{ html: string; warnings: str
         warnings.push(`无法获取 CSS: ${href}`);
       }
     } catch {
-      warnings.push(`获取 CSS 失败: ${href}（将保留外部引用）`);
+      warnings.push(
+        `无法内联 CSS: ${href}（已保留外部引用）。浏览器受同源策略限制，无法跨域读取第三方样式表——这是浏览器限制而非缺陷。若该页由扩展抓取，CSS 已在抓取阶段完成内联，不会走到这里。`
+      );
     }
   });
 
@@ -167,8 +175,19 @@ export async function exportHtml(
   let result = html;
   const warnings: string[] = [];
 
-  // 1. Inline CSS
-  if (options.inlineStyles) {
+  // 0. 按体积决定执行哪些步骤（超阈值自动跳过对大字符串不友好的步骤）
+  const inputBytes = new Blob([result]).size;
+  const strategy = decideExportStrategy(inputBytes, options);
+  warnings.push(...strategy.warnings);
+
+  const skippedSteps: string[] = [];
+  if (!strategy.beautify) skippedSteps.push('程序美化');
+  if (!strategy.cleanEditorAttrs) skippedSteps.push('编辑器属性清理');
+  if (!strategy.minify && options.minify) skippedSteps.push('压缩输出');
+  if (strategy.skipInlineStyles) skippedSteps.push('内联 CSS');
+
+  // 1. Inline CSS（浏览器无法跨域读取第三方 CSS，大页面下直接跳过）
+  if (options.inlineStyles && !strategy.skipInlineStyles) {
     const inlineResult = await inlineStyles(result);
     result = inlineResult.html;
     warnings.push(...inlineResult.warnings);
@@ -177,15 +196,15 @@ export async function exportHtml(
   // 2. Inject tracking scripts (含替换的和新增的)
   result = injectTrackingScripts(result, detectedScripts, addedScripts);
 
-  // 3. Clean editor attributes
-  if (options.cleanEditorAttrs) {
+  // 3. Clean editor attributes（5 次全文正则，大页面下跳过）
+  if (options.cleanEditorAttrs && strategy.cleanEditorAttrs) {
     result = cleanEditorAttrs(result);
   }
 
-  // 4. Minify or Beautify
-  if (options.minify) {
+  // 4. Minify or Beautify（beautifyHtml 会对全文 split/map/join，大页面下跳过）
+  if (strategy.minify) {
     result = minifyHtml(result);
-  } else {
+  } else if (strategy.beautify) {
     result = beautifyHtml(result);
   }
 
@@ -198,6 +217,8 @@ export async function exportHtml(
     html: result,
     size: new Blob([result]).size,
     warnings,
+    degraded: skippedSteps.length > 0,
+    skippedSteps,
   };
 }
 
@@ -211,5 +232,24 @@ export function downloadHtml(html: string, fileName: string): void {
   a.click();
   document.body.removeChild(a);
   // Delay revocation to ensure the browser has initiated the download
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * 把导出的 HTML 打包成 zip 并触发下载。
+ *
+ * zip 内只有 `index.html` 一个条目：产物形态是「单文件自包含」，
+ * 图片已内联为 base64 dataURL，因此没有任何外链资源需要一并打包。
+ * 这个 zip 可以直接拖进 Cloudflare Pages / Netlify / Vercel 等任意静态托管。
+ */
+export function downloadZip(html: string, fileName: string): void {
+  const blob = buildZipBlob(html);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName.endsWith('.zip') ? fileName : `${fileName}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
